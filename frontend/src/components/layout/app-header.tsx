@@ -4,6 +4,7 @@ import { useState } from "react";
 import { usePathname } from "next/navigation";
 import { Menu } from "lucide-react";
 
+import { BackendStatus } from "@/components/layout/backend-status";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { pageTitle } from "@/components/layout/nav-config";
 import { Badge } from "@/components/ui/badge";
@@ -46,16 +47,13 @@ export function AppHeader() {
       <div className="min-w-0 flex-1">
         <h1 className="truncate font-heading text-sm font-medium">{pageTitle(pathname)}</h1>
         <p className="hidden text-xs text-muted-foreground sm:block">
-          Agentic threat investigation — mock data until the API is connected
+          Agentic threat investigation — incident records are still mock data
         </p>
       </div>
       <Badge variant="outline" className="hidden sm:inline-flex">
         Mock data
       </Badge>
-      <div className="hidden items-center gap-2 rounded-lg border border-border/80 px-2.5 py-1 text-xs sm:flex">
-        <span className="size-1.5 rounded-full bg-amber-400" aria-hidden="true" />
-        Backend not connected
-      </div>
+      <BackendStatus />
     </header>
   );
 }

@@ -1,6 +1,6 @@
 # AI-SOC frontend
 
-Next.js App Router UI for the AI-SOC dashboard. The FastAPI backend is a separate application; this package talks to it over REST and SSE once Phase 3+ is in place.
+Next.js App Router UI for the AI-SOC dashboard. The FastAPI backend is a separate application. This package calls `GET /health` for the dashboard connection indicator. Incident records still come from mock data until Phase 5.
 
 ## Stack
 
@@ -23,9 +23,9 @@ See `../docs/environment.md`. Only `NEXT_PUBLIC_*` variables belong here; they a
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `NEXT_PUBLIC_API_BASE_URL` | `http://localhost:8000` | FastAPI origin (used from Phase 3) |
+| `NEXT_PUBLIC_API_BASE_URL` | `http://localhost:8000` | FastAPI origin used by `src/lib/api.ts` |
 | `NEXT_PUBLIC_APP_NAME` | `AI-SOC` | Header product name |
 
-## Data in Phase 2
+## Data
 
-Pages read from `src/lib/data.ts`, which currently returns `src/lib/mock-data.ts`. Do not call FastAPI from UI components yet. Mock records cover the three frozen demo scenarios (brute-force, suspicious outbound, benign).
+Pages still read incidents and events from `src/lib/data.ts` → `src/lib/mock-data.ts`. The only live backend call in Phase 3 is `getHealth()` from `src/lib/api.ts`. Mock records cover the three frozen demo scenarios (brute-force, suspicious outbound, benign).

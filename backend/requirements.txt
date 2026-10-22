@@ -1,0 +1,8 @@
+# Runtime dependencies for the FastAPI application.
+# Pin versions deliberately. Install with:
+#   uv pip install --python .venv -r requirements.txt
+fastapi==0.159.1
+uvicorn[standard]==0.54.0
+pydantic==2.14.1
+pydantic-settings==2.16.1
+python-multipart==0.0.32
