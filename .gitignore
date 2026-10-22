@@ -1,0 +1,86 @@
+# ──────────────────────────────────────────────
+# Secrets — never commit real environment files
+# ──────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# ──────────────────────────────────────────────
+# Node / Next.js (frontend/)
+# ──────────────────────────────────────────────
+node_modules/
+.next/
+out/
+.vercel/
+.turbo/
+*.tsbuildinfo
+next-env.d.ts
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.eslintcache
+
+# ──────────────────────────────────────────────
+# Python / FastAPI (backend/)
+# ──────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+ENV/
+*.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.hypothesis/
+
+# ──────────────────────────────────────────────
+# Database / data artifacts
+# ──────────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+pgdata/
+backend/uploads/
+backend/reports/generated/
+
+# ──────────────────────────────────────────────
+# Docker
+# ──────────────────────────────────────────────
+docker-compose.override.yml
+
+# ──────────────────────────────────────────────
+# IDE / editor
+# ──────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ──────────────────────────────────────────────
+# OS
+# ──────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ──────────────────────────────────────────────
+# Logs / temp
+# ──────────────────────────────────────────────
+*.log
+logs/
+tmp/
+temp/
