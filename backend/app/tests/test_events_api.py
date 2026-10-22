@@ -49,3 +49,24 @@ def test_list_events_rejects_oversized_limit(client: TestClient) -> None:
     response = client.get("/api/events", params={"limit": 501})
     assert response.status_code == 422
     assert response.json()["error"] == "validation_error"
+
+
+def test_list_events_rejects_unknown_scenario(client: TestClient) -> None:
+    response = client.get("/api/events", params={"scenario": "Z"})
+    assert response.status_code == 422
+    assert response.json()["error"] == "validation_error"
+
+
+def test_list_events_paginates_with_stable_id_order(
+    client: TestClient, seed_db: dict[str, int]
+) -> None:
+    first = client.get("/api/events", params={"limit": 5, "offset": 0}).json()
+    second = client.get("/api/events", params={"limit": 5, "offset": 5}).json()
+    assert first["total"] == seed_db["events"]
+    assert len(first["items"]) == 5
+    assert len(second["items"]) == 5
+    first_ids = [item["id"] for item in first["items"]]
+    second_ids = [item["id"] for item in second["items"]]
+    assert set(first_ids).isdisjoint(second_ids)
+    timestamps = [item["timestamp"] for item in first["items"] + second["items"]]
+    assert timestamps == sorted(timestamps)

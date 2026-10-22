@@ -59,3 +59,17 @@ def test_list_incidents_filters_by_severity(
     body = response.json()
     assert body["total"] == 1
     assert body["items"][0]["severity"] == "low"
+
+
+def test_list_incidents_rejects_unknown_status(client: TestClient) -> None:
+    response = client.get("/api/incidents", params={"status": "unknown"})
+    assert response.status_code == 422
+    assert response.json()["error"] == "validation_error"
+
+
+def test_list_incidents_paginates(client: TestClient, seed_db: dict[str, int]) -> None:
+    response = client.get("/api/incidents", params={"limit": 1, "offset": 0})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == seed_db["incidents"]
+    assert len(body["items"]) == 1

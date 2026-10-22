@@ -31,7 +31,7 @@ def list_events(
         session.scalars(
             select(SecurityEvent)
             .where(*filters)
-            .order_by(SecurityEvent.timestamp.asc())
+            .order_by(SecurityEvent.timestamp.asc(), SecurityEvent.id.asc())
             .limit(limit)
             .offset(offset)
         ).all()

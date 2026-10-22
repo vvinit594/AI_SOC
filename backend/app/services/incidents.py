@@ -30,7 +30,7 @@ def list_incidents(
             select(Incident)
             .options(selectinload(Incident.event_links))
             .where(*filters)
-            .order_by(Incident.created_at.desc())
+            .order_by(Incident.created_at.desc(), Incident.id.desc())
             .limit(limit)
             .offset(offset)
         ).all()

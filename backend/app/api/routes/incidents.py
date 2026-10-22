@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Incident
 from app.db.session import get_db
+from app.schemas.enums import IncidentStatus, Severity
 from app.schemas.incidents import IncidentListResponse, IncidentRead
 from app.services import incidents as incident_service
 
@@ -13,13 +14,14 @@ router = APIRouter(prefix="/incidents", tags=["incidents"])
 
 def _to_read(incident: Incident) -> IncidentRead:
     payload = IncidentRead.model_validate(incident)
-    return payload.model_copy(update={"event_ids": incident_service.incident_event_ids(incident)})
+    event_ids = incident_service.incident_event_ids(incident)
+    return payload.model_copy(update={"event_ids": event_ids})
 
 
 @router.get("", response_model=IncidentListResponse, summary="List incidents")
 def list_incidents(
-    status: str | None = None,
-    severity: str | None = None,
+    status: IncidentStatus | None = None,
+    severity: Severity | None = None,
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_db),

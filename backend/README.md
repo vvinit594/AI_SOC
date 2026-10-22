@@ -47,6 +47,8 @@ Apply migrations and seed the three frozen demo scenarios (RFC 5737 documentatio
 
 `DATABASE_URL` defaults to `postgresql+psycopg://aisoc:aisoc@localhost:5432/aisoc`. Pytest does not use Postgres; tests create tables on `sqlite:///:memory:`.
 
+If host port 5432 is already taken (for example a Windows `postgresql-x64-18` service), keep the Compose database as-is and point local `DATABASE_URL` at another published host port. Do not change the committed Compose credentials or drop the volume. A gitignored `docker-compose.override.yml` can publish an extra host port without editing `docker-compose.yml`.
+
 ## Run
 
 ```bash

@@ -83,6 +83,8 @@ This document lists every environment variable the AI-SOC application reads, whe
 
 ## Local PostgreSQL via Docker Compose (Phase 4 / 10)
 
+Compose publishes Postgres on host port `5432`. If that port is already bound (common on Windows when `postgresql-x64-18` is installed), the API will fail with password authentication errors because it is talking to the wrong server. Leave the committed Compose service unchanged and use a gitignored override port plus a matching local `DATABASE_URL`.
+
 | Variable | Default | Secret | Description |
 |----------|---------|--------|-------------|
 | `POSTGRES_USER` | `aisoc` | **yes** | Database user created by the Postgres container. |

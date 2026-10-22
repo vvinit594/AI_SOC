@@ -147,3 +147,69 @@ def test_incident_event_pair_is_unique(client: TestClient) -> None:
             session.rollback()
     finally:
         session.close()
+
+
+def test_incident_event_rejects_missing_event_foreign_key(client: TestClient) -> None:
+    from sqlalchemy.exc import IntegrityError
+
+    session = client.app.state.session_factory()
+    try:
+        incident = Incident(
+            title="Missing event FK",
+            severity="low",
+            status="open",
+            summary="Link must reference an existing event",
+        )
+        session.add(incident)
+        session.flush()
+        session.add(
+            IncidentEvent(
+                incident_id=incident.id,
+                event_id=uuid.uuid4(),
+                link_type="evidence",
+            )
+        )
+        try:
+            session.flush()
+            raise AssertionError("expected foreign key on incident_events.event_id")
+        except IntegrityError:
+            session.rollback()
+    finally:
+        session.close()
+
+
+def test_deleting_incident_cascades_event_links(client: TestClient) -> None:
+    from sqlalchemy import func
+
+    session = client.app.state.session_factory()
+    try:
+        event = SecurityEvent(
+            timestamp=datetime(2026, 10, 21, 8, 0, tzinfo=UTC),
+            event_type="login_success",
+            source="linux_auth",
+            raw_message="Accepted publickey",
+        )
+        incident = Incident(
+            title="Cascade check",
+            severity="low",
+            status="open",
+            summary="Deleting an incident must remove evidence links",
+        )
+        session.add_all([event, incident])
+        session.flush()
+        session.add(
+            IncidentEvent(
+                incident_id=incident.id,
+                event_id=event.id,
+                link_type="evidence",
+            )
+        )
+        session.commit()
+        event_id = event.id
+        session.delete(incident)
+        session.commit()
+        remaining_links = session.scalar(select(func.count()).select_from(IncidentEvent))
+        assert remaining_links == 0
+        assert session.get(SecurityEvent, event_id) is not None
+    finally:
+        session.close()
