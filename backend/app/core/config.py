@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     )
     db_pool_size: int = Field(default=5, ge=1)
     db_max_overflow: int = Field(default=5, ge=0)
+    max_upload_size_mb: int = Field(default=10, ge=1)
+    max_events_per_upload: int = Field(default=50000, ge=1)
 
     @field_validator("database_url")
     @classmethod

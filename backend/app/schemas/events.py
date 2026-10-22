@@ -18,6 +18,7 @@ class SecurityEventCreate(BaseModel):
     source: str = Field(min_length=1, max_length=64)
     raw_message: str = Field(min_length=1)
     scenario: DemoScenario | None = None
+    id: uuid.UUID | None = None
 
     @field_validator("timestamp")
     @classmethod

@@ -41,3 +41,16 @@ def list_events(
 
 def get_event(session: Session, event_id: uuid.UUID) -> SecurityEvent | None:
     return session.get(SecurityEvent, event_id)
+
+
+def upsert_events(session: Session, payloads: list[dict[str, object]]) -> list[uuid.UUID]:
+    ids: list[uuid.UUID] = []
+    for payload in payloads:
+        fields = dict(payload)
+        event_id = fields.get("id")
+        if event_id is None:
+            fields["id"] = uuid.uuid4()
+        merged = session.merge(SecurityEvent(**fields))
+        ids.append(merged.id)
+    session.commit()
+    return ids

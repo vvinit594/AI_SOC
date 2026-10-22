@@ -4,6 +4,7 @@ from app.schemas.common import ErrorResponse
 from app.schemas.events import EventListResponse, SecurityEventCreate, SecurityEventRead
 from app.schemas.health import HealthResponse
 from app.schemas.incidents import IncidentCreate, IncidentListResponse, IncidentRead
+from app.schemas.ingestion import LogUploadResponse, RecordError, ScenarioLoadResponse
 
 __all__ = [
     "ErrorResponse",
@@ -12,6 +13,9 @@ __all__ = [
     "IncidentCreate",
     "IncidentListResponse",
     "IncidentRead",
+    "LogUploadResponse",
+    "RecordError",
+    "ScenarioLoadResponse",
     "SecurityEventCreate",
     "SecurityEventRead",
 ]
