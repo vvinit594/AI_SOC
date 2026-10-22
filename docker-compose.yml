@@ -1,0 +1,21 @@
+# Local PostgreSQL for Phase 4 development.
+# The full application stack is containerized in Phase 10.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: aisoc
+      POSTGRES_PASSWORD: aisoc
+      POSTGRES_DB: aisoc
+    ports:
+      - "5432:5432"
+    volumes:
+      - aisoc_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aisoc -d aisoc"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  aisoc_pgdata:

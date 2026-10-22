@@ -35,6 +35,19 @@ class Settings(BaseSettings):
         default="http://localhost:3000",
         description="Comma-separated explicit frontend origins. Never '*'.",
     )
+    database_url: str = Field(
+        default="postgresql+psycopg://aisoc:aisoc@localhost:5432/aisoc",
+        description="SQLAlchemy database URL.",
+    )
+    db_pool_size: int = Field(default=5, ge=1)
+    db_max_overflow: int = Field(default=5, ge=0)
+
+    @field_validator("database_url")
+    @classmethod
+    def database_url_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("DATABASE_URL must not be empty")
+        return value.strip()
 
     @field_validator("log_level")
     @classmethod

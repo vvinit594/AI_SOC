@@ -1,5 +1,6 @@
 import logging
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -14,6 +15,8 @@ from app.api.router import api_router
 from app.api.routes.health import router as health_router
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
+from app.db import models as _db_models  # noqa: F401
+from app.db.session import create_engine_from_settings, create_session_factory
 from app.schemas.common import ErrorResponse
 
 logger = logging.getLogger(__name__)
@@ -22,6 +25,13 @@ logger = logging.getLogger(__name__)
 def create_app(settings: Settings | None = None) -> FastAPI:
     resolved = settings if settings is not None else get_settings()
     configure_logging(resolved)
+    engine = create_engine_from_settings(resolved)
+    session_factory = create_session_factory(engine)
+
+    @asynccontextmanager
+    async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
+        yield
+        engine.dispose()
 
     application = FastAPI(
         title=resolved.app_name,
@@ -30,7 +40,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         docs_url="/docs" if resolved.docs_enabled else None,
         redoc_url="/redoc" if resolved.docs_enabled else None,
         openapi_url="/openapi.json" if resolved.docs_enabled else None,
+        lifespan=lifespan,
     )
+    application.state.engine = engine
+    application.state.session_factory = session_factory
 
     application.add_middleware(
         CORSMiddleware,

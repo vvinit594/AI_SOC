@@ -28,7 +28,7 @@ This document lists every environment variable the AI-SOC application reads, whe
 
 | Variable | Required | Default | Secret | Description |
 |----------|----------|---------|--------|-------------|
-| `DATABASE_URL` | yes | — | **yes** | SQLAlchemy URL, e.g. `postgresql+psycopg://aisoc:aisoc@localhost:5432/aisoc`. Use `?sslmode=require` with managed providers. |
+| `DATABASE_URL` | no | `postgresql+psycopg://aisoc:aisoc@localhost:5432/aisoc` | **yes** | SQLAlchemy URL. Matches the local Compose Postgres service. Use `?sslmode=require` with managed providers. Pytest uses `sqlite:///:memory:` and does not read this value. |
 | `DB_POOL_SIZE` | no | `5` | no | SQLAlchemy connection pool size. Keep within the managed DB's connection limit. |
 | `DB_MAX_OVERFLOW` | no | `5` | no | Extra connections allowed beyond pool size. |
 

@@ -25,3 +25,16 @@ def test_docs_disabled_in_production() -> None:
     settings = build_settings(app_env="production")
     assert settings.docs_enabled is False
     assert settings.is_production is True
+
+
+def test_blank_database_url_is_rejected() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(_env_file=None, database_url="   ")
+    assert "DATABASE_URL" in str(exc_info.value)
+
+
+def test_test_settings_use_sqlite_memory() -> None:
+    settings = build_settings()
+    assert settings.database_url == "sqlite:///:memory:"
+    assert settings.db_pool_size == 5
+    assert settings.db_max_overflow == 5

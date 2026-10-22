@@ -54,11 +54,12 @@ The frontend and backend are **separate applications**. All secrets (LLM keys, t
 
 ```
 ai-soc/
-├── frontend/     # Next.js application
-├── backend/      # FastAPI application, detection engine, LangGraph agents
-├── docs/         # Specification, environment variables, design notes
+├── frontend/          # Next.js application
+├── backend/           # FastAPI application, detection engine, LangGraph agents
+├── docs/              # Specification, environment variables, design notes
 │   ├── MVP_SPEC.md
 │   └── environment.md
+├── docker-compose.yml # Local PostgreSQL (full stack in Phase 10)
 ├── .gitignore
 └── README.md
 ```
@@ -110,27 +111,42 @@ Open [http://localhost:3000](http://localhost:3000). Incident tables still use m
 npm run build    # production build check
 ```
 
-**Backend (Phase 3)**
+**Backend (Phase 3–4)**
 
 ```bash
 cd backend
 uv venv --python 3.13 .venv
 uv pip install --python .venv -r requirements-dev.txt
 copy .env.example .env
+```
+
+Start PostgreSQL, apply migrations, and seed the three demo scenarios:
+
+```bash
+docker compose up -d postgres
+cd backend
+.venv\Scripts\alembic.exe upgrade head
+.venv\Scripts\python.exe -m app.db.seed
 .venv\Scripts\uvicorn.exe app.main:app --reload --port 8000
 ```
 
-On macOS or Linux, activate `.venv` and run `uvicorn app.main:app --reload --port 8000`.
+On macOS or Linux, activate `.venv` and run `alembic upgrade head`, `python -m app.db.seed`, then `uvicorn app.main:app --reload --port 8000`.
 
 - Health: [http://localhost:8000/health](http://localhost:8000/health)
+- Events: [http://localhost:8000/api/events](http://localhost:8000/api/events)
+- Incidents: [http://localhost:8000/api/incidents](http://localhost:8000/api/incidents)
 - Docs: [http://localhost:8000/docs](http://localhost:8000/docs)
+
+Pytest uses an in-memory SQLite database and does not require Docker:
 
 ```bash
 .venv\Scripts\python.exe -m pytest
 .venv\Scripts\ruff.exe check app
 ```
 
-Database setup lands in Phase 4. The final target is a single command:
+The frontend still reads Phase 2 mock data. `GET /api/events` and `GET /api/incidents` persist and return the same demo IDs so Phase 5 can swap the UI without changing scenarios.
+
+The final target is a single command:
 
 ```bash
 docker compose up --build
@@ -144,7 +160,7 @@ docker compose up --build
 | 1 | Development environment & repository | ✅ Done |
 | 2 | Next.js frontend foundation | ✅ Done |
 | 3 | FastAPI backend | ✅ Done |
-| 4 | Database & event schemas | ⏳ |
+| 4 | Database & event schemas | ✅ Done |
 | 5 | Log ingestion & threat detection | ⏳ |
 | 6 | Agentic AI workflow (LangGraph) | ⏳ |
 | 7 | Live investigation progress (SSE) | ⏳ |

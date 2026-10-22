@@ -1,1 +1,1 @@
-"""Domain services. Detection, persistence, and agents land in later phases."""
+"""Domain services. Detection and agents land in later phases."""
