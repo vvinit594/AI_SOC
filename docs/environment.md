@@ -61,6 +61,7 @@ This document lists every environment variable the AI-SOC application reads, whe
 | `RULE_AUTH_FAILURE_WINDOW_MINUTES` | no | `5` | no | R1/R2 time window. |
 | `RULE_OUTBOUND_CONNECTION_THRESHOLD` | no | `10` | no | R3: connections from one host to one external IP within the window. |
 | `RULE_OUTBOUND_WINDOW_MINUTES` | no | `5` | no | R3 time window. |
+| `RULE_SEEDED_SUSPICIOUS_IPS` | no | `198.51.100.88` | no | Comma-separated destinations that fire R3 on any connection (demo indicator). |
 
 ### Security (Phase 8–9)
 

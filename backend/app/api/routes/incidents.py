@@ -3,11 +3,14 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.core.config import Settings, get_settings
 from app.db.models import Incident
 from app.db.session import get_db
+from app.schemas.detection import DetectResponse
 from app.schemas.enums import IncidentStatus, Severity
 from app.schemas.incidents import IncidentListResponse, IncidentRead
 from app.services import incidents as incident_service
+from app.services.detection import detect_incidents
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
 
@@ -34,6 +37,14 @@ def list_incidents(
         offset=offset,
     )
     return IncidentListResponse(items=[_to_read(item) for item in items], total=total)
+
+
+@router.post("/detect", response_model=DetectResponse, summary="Run detection rules")
+def run_detection(
+    session: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> DetectResponse:
+    return detect_incidents(session, settings)
 
 
 @router.get("/{incident_id}", response_model=IncidentRead, summary="Get incident details")

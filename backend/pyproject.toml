@@ -19,3 +19,4 @@ select = ["E", "F", "I", "UP", "W"]
 
 [tool.ruff.lint.per-file-ignores]
 "app/tests/*" = ["E402"]
+"migrations/*" = ["I001"]

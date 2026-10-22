@@ -1,9 +1,36 @@
 import uuid
+from datetime import datetime
+from typing import Any
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.db.models import SecurityEvent
+
+_SIGNATURE_FIELDS = (
+    "timestamp",
+    "event_type",
+    "source_ip",
+    "destination_ip",
+    "username",
+    "hostname",
+    "action",
+    "source",
+    "raw_message",
+    "scenario",
+)
+
+
+def event_signature(payload: dict[str, Any] | SecurityEvent) -> tuple[object, ...]:
+    if isinstance(payload, SecurityEvent):
+        values = {field: getattr(payload, field) for field in _SIGNATURE_FIELDS}
+    else:
+        values = {field: payload.get(field) for field in _SIGNATURE_FIELDS}
+    timestamp = values["timestamp"]
+    if isinstance(timestamp, datetime):
+        values["timestamp"] = timestamp.isoformat()
+    return tuple(values[field] for field in _SIGNATURE_FIELDS)
 
 
 def list_events(
@@ -45,12 +72,15 @@ def get_event(session: Session, event_id: uuid.UUID) -> SecurityEvent | None:
 
 def upsert_events(session: Session, payloads: list[dict[str, object]]) -> list[uuid.UUID]:
     ids: list[uuid.UUID] = []
-    for payload in payloads:
-        fields = dict(payload)
-        event_id = fields.get("id")
-        if event_id is None:
-            fields["id"] = uuid.uuid4()
-        merged = session.merge(SecurityEvent(**fields))
-        ids.append(merged.id)
-    session.commit()
+    try:
+        for payload in payloads:
+            fields = dict(payload)
+            if fields.get("id") is None:
+                fields["id"] = uuid.uuid4()
+            merged = session.merge(SecurityEvent(**fields))
+            ids.append(merged.id)
+        session.commit()
+    except SQLAlchemyError:
+        session.rollback()
+        raise
     return ids

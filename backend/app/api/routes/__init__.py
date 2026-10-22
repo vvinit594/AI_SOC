@@ -1,5 +1,5 @@
 """HTTP route modules.
 
-Health, event/incident reads, and log ingestion are implemented;
-detection and agents remain reserved.
+Health, event/incident reads, log ingestion, and detection are implemented;
+agents remain reserved.
 """

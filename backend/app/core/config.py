@@ -43,6 +43,15 @@ class Settings(BaseSettings):
     db_max_overflow: int = Field(default=5, ge=0)
     max_upload_size_mb: int = Field(default=10, ge=1)
     max_events_per_upload: int = Field(default=50000, ge=1)
+    rule_auth_failure_threshold: int = Field(default=5, ge=1)
+    rule_auth_failure_window_minutes: int = Field(default=5, ge=1)
+    rule_outbound_connection_threshold: int = Field(default=10, ge=1)
+    rule_outbound_window_minutes: int = Field(default=5, ge=1)
+    rule_seeded_suspicious_ips: str = Field(default="198.51.100.88")
+
+    @property
+    def seeded_suspicious_ips(self) -> set[str]:
+        return {part.strip() for part in self.rule_seeded_suspicious_ips.split(",") if part.strip()}
 
     @field_validator("database_url")
     @classmethod

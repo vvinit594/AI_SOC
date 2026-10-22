@@ -190,3 +190,56 @@ def test_unknown_scenario_is_rejected(client: TestClient) -> None:
     assert response.status_code == 422
     assert response.json()["error"] == "validation_error"
 
+
+def test_conflicting_duplicate_ids_in_upload_are_rejected(client: TestClient) -> None:
+    event_id = str(uuid.uuid4())
+    payload = [
+        {**VALID_EVENT, "id": event_id, "raw_message": "first"},
+        {**VALID_EVENT, "id": event_id, "raw_message": "second"},
+    ]
+    response = _upload(client, "events.json", json.dumps(payload), "application/json")
+    assert response.status_code == 400
+    body = response.json()
+    assert body["error"] == "ingest_error"
+    assert any("conflicting fields" in error["detail"] for error in body["errors"])
+    assert client.get("/api/events").json()["total"] == 0
+
+
+def test_conflicting_existing_id_does_not_overwrite(client: TestClient) -> None:
+    event_id = str(uuid.uuid4())
+    first = _upload(
+        client,
+        "events.json",
+        json.dumps([{**VALID_EVENT, "id": event_id}]),
+        "application/json",
+    )
+    assert first.status_code == 200
+    second = _upload(
+        client,
+        "events.json",
+        json.dumps([{**VALID_EVENT, "id": event_id, "username": "other_user"}]),
+        "application/json",
+    )
+    assert second.status_code == 400
+    assert "conflicts with an existing event" in second.json()["errors"][0]["detail"]
+    listed = client.get("/api/events").json()
+    assert listed["total"] == 1
+    assert listed["items"][0]["username"] == "demo_user"
+
+
+def test_persist_failure_returns_error_without_partial_commit(
+    client: TestClient, monkeypatch
+) -> None:
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from app.services import ingestion as ingestion_service
+
+    def boom(*_args: object, **_kwargs: object) -> list[uuid.UUID]:
+        raise SQLAlchemyError("constraint failed")
+
+    monkeypatch.setattr(ingestion_service.event_service, "upsert_events", boom)
+    response = _upload(client, "events.json", json.dumps([VALID_EVENT]), "application/json")
+    assert response.status_code == 500
+    assert client.get("/api/events").json()["total"] == 0
+
+

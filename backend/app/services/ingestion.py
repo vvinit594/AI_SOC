@@ -6,14 +6,18 @@ import json
 from typing import Any, Literal
 
 from pydantic import ValidationError
+from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.db.demo_data import demo_events
+from app.db.models import SecurityEvent
 from app.schemas.enums import DemoScenario
 from app.schemas.events import SecurityEventCreate
 from app.schemas.ingestion import LogUploadResponse, RecordError, ScenarioLoadResponse
 from app.services import events as event_service
+from app.services.events import event_signature
 
 _FIELD_ALIASES = {
     "eventType": "event_type",
@@ -85,26 +89,92 @@ def ingest_records(
             f"Upload contains more than {settings.max_events_per_upload} events"
         )
 
-    valid: list[dict[str, object]] = []
+    valid: list[tuple[int, dict[str, object]]] = []
     errors: list[RecordError] = []
+    batch_by_id: dict[object, tuple[int, dict[str, object]]] = {}
+    conflicted_ids: set[object] = set()
+
     for index, record in enumerate(records):
         try:
-            payload = SecurityEventCreate.model_validate(_normalize_record(record))
+            payload = SecurityEventCreate.model_validate(_normalize_record(record)).model_dump()
         except (ValidationError, TypeError, ValueError) as exc:
             errors.append(RecordError(index=index, detail=_record_error_detail(exc)))
             continue
-        valid.append(payload.model_dump())
+        event_id = payload.get("id")
+        if event_id is not None and event_id in batch_by_id:
+            prior_index, prior = batch_by_id[event_id]
+            if event_signature(prior) != event_signature(payload):
+                conflicted_ids.add(event_id)
+                errors.append(
+                    RecordError(
+                        index=prior_index,
+                        detail="id is duplicated with conflicting fields in this upload",
+                    )
+                )
+                errors.append(
+                    RecordError(
+                        index=index,
+                        detail="id is duplicated with conflicting fields in this upload",
+                    )
+                )
+            continue
+        if event_id is not None:
+            batch_by_id[event_id] = (index, payload)
+        valid.append((index, payload))
+
+    if conflicted_ids:
+        valid = [
+            item for item in valid if item[1].get("id") not in conflicted_ids
+        ]
+
+    existing_conflicts = _conflicting_existing_ids(session, [item[1] for item in valid])
+    if existing_conflicts:
+        kept: list[tuple[int, dict[str, object]]] = []
+        for index, payload in valid:
+            event_id = payload.get("id")
+            if event_id in existing_conflicts:
+                errors.append(
+                    RecordError(
+                        index=index,
+                        detail="id conflicts with an existing event",
+                    )
+                )
+                continue
+            kept.append((index, payload))
+        valid = kept
 
     if not valid:
         raise IngestFileError("No valid events in upload", errors=errors)
 
-    event_ids = event_service.upsert_events(session, valid)
+    try:
+        event_ids = event_service.upsert_events(session, [item[1] for item in valid])
+    except SQLAlchemyError as exc:
+        raise IngestFileError("Failed to persist events", status_code=500) from exc
     return LogUploadResponse(
         accepted=len(event_ids),
         rejected=len(errors),
         event_ids=event_ids,
         errors=errors,
     )
+
+
+def _conflicting_existing_ids(
+    session: Session, payloads: list[dict[str, object]]
+) -> set[object]:
+    wanted = [payload["id"] for payload in payloads if payload.get("id") is not None]
+    if not wanted:
+        return set()
+    existing = {
+        row.id: row
+        for row in session.scalars(select(SecurityEvent).where(SecurityEvent.id.in_(wanted))).all()
+    }
+    conflicts: set[object] = set()
+    for payload in payloads:
+        event_id = payload.get("id")
+        current = existing.get(event_id) if event_id is not None else None
+        if current is not None and event_signature(current) != event_signature(payload):
+            conflicts.add(event_id)
+    return conflicts
 
 
 def load_scenario(session: Session, scenario: DemoScenario) -> ScenarioLoadResponse:
