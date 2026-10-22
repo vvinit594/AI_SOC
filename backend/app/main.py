@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Mapping
 from typing import Any
 
@@ -11,32 +12,38 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app import __version__
 from app.api.router import api_router
 from app.api.routes.health import router as health_router
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
 from app.schemas.common import ErrorResponse
 
-settings = get_settings()
-configure_logging(settings)
+logger = logging.getLogger(__name__)
 
 
-def create_app() -> FastAPI:
+def create_app(settings: Settings | None = None) -> FastAPI:
+    resolved = settings if settings is not None else get_settings()
+    configure_logging(resolved)
+
     application = FastAPI(
-        title=settings.app_name,
+        title=resolved.app_name,
         version=__version__,
         description="AI-SOC backend: log processing, detection, and agent orchestration.",
-        docs_url="/docs" if settings.docs_enabled else None,
-        redoc_url="/redoc" if settings.docs_enabled else None,
-        openapi_url="/openapi.json" if settings.docs_enabled else None,
+        docs_url="/docs" if resolved.docs_enabled else None,
+        redoc_url="/redoc" if resolved.docs_enabled else None,
+        openapi_url="/openapi.json" if resolved.docs_enabled else None,
     )
 
     application.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_origins,
+        allow_origins=resolved.cors_origins,
         allow_credentials=False,
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "Accept"],
     )
 
+    def provide_settings() -> Settings:
+        return resolved
+
+    application.dependency_overrides[get_settings] = provide_settings
     application.include_router(health_router)
     application.include_router(api_router, prefix="/api")
 
@@ -69,8 +76,9 @@ def create_app() -> FastAPI:
 
     @application.exception_handler(Exception)
     async def unhandled_exception_handler(
-        _request: Request, _exc: Exception
+        _request: Request, exc: Exception
     ) -> JSONResponse:
+        logger.exception("Unhandled application error", exc_info=exc)
         payload = ErrorResponse(
             error="internal_error",
             detail="An unexpected error occurred",

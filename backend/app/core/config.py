@@ -7,6 +7,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 AppEnv = Literal["development", "test", "production"]
 
 
+def parse_cors_origins(value: str) -> list[str]:
+    origins = [origin.strip() for origin in value.split(",") if origin.strip()]
+    if not origins:
+        raise ValueError("CORS_ALLOWED_ORIGINS must list at least one origin")
+    if any(origin == "*" for origin in origins):
+        raise ValueError("CORS_ALLOWED_ORIGINS must be an explicit allowlist, not '*'")
+    return origins
+
+
 class Settings(BaseSettings):
     """Runtime settings loaded from environment variables and optional `.env`."""
 
@@ -32,18 +41,15 @@ class Settings(BaseSettings):
     def normalize_log_level(cls, value: str) -> str:
         return value.upper()
 
+    @field_validator("cors_allowed_origins")
+    @classmethod
+    def validate_cors_allowed_origins(cls, value: str) -> str:
+        parse_cors_origins(value)
+        return value
+
     @property
     def cors_origins(self) -> list[str]:
-        origins = [
-            origin.strip()
-            for origin in self.cors_allowed_origins.split(",")
-            if origin.strip()
-        ]
-        if not origins:
-            raise ValueError("CORS_ALLOWED_ORIGINS must list at least one origin")
-        if any(origin == "*" for origin in origins):
-            raise ValueError("CORS_ALLOWED_ORIGINS must be an explicit allowlist, not '*'")
-        return origins
+        return parse_cors_origins(self.cors_allowed_origins)
 
     @property
     def is_production(self) -> bool:

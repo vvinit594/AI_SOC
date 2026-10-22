@@ -1,14 +1,20 @@
+import pytest
+from fastapi.testclient import TestClient
+from pydantic import ValidationError
+
+from app.core.config import Settings
+
 ALLOWED_ORIGIN = "http://localhost:3000"
 DISALLOWED_ORIGIN = "http://evil.example"
 
 
-def test_health_includes_cors_allow_origin(client) -> None:
+def test_health_includes_cors_allow_origin(client: TestClient) -> None:
     response = client.get("/health", headers={"Origin": ALLOWED_ORIGIN})
     assert response.status_code == 200
     assert response.headers.get("access-control-allow-origin") == ALLOWED_ORIGIN
 
 
-def test_preflight_allows_configured_origin(client) -> None:
+def test_preflight_allows_configured_origin(client: TestClient) -> None:
     response = client.options(
         "/health",
         headers={
@@ -20,18 +26,13 @@ def test_preflight_allows_configured_origin(client) -> None:
     assert response.headers.get("access-control-allow-origin") == ALLOWED_ORIGIN
 
 
-def test_disallowed_origin_is_not_reflected(client) -> None:
+def test_disallowed_origin_is_not_reflected(client: TestClient) -> None:
     response = client.get("/health", headers={"Origin": DISALLOWED_ORIGIN})
     assert response.status_code == 200
     assert response.headers.get("access-control-allow-origin") != DISALLOWED_ORIGIN
 
 
-def test_wildcard_cors_is_rejected() -> None:
-    from app.core.config import Settings
-
-    settings = Settings(cors_allowed_origins="*")
-    try:
-        _ = settings.cors_origins
-        raise AssertionError("wildcard CORS should be rejected")
-    except ValueError as exc:
-        assert "explicit allowlist" in str(exc)
+def test_wildcard_cors_is_rejected_at_construction() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(_env_file=None, cors_allowed_origins="*")
+    assert "explicit allowlist" in str(exc_info.value)
