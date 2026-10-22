@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
@@ -17,6 +17,8 @@ from app.schemas.incidents import IncidentRead
 from app.services import incidents as incident_service
 
 INCIDENT_NAMESPACE = uuid.UUID("a15ec005-0000-4000-8000-000000000005")
+_CLOSED_STATUSES = frozenset({"resolved", "dismissed"})
+_SEVERITY_RANK = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 
 
 @dataclass
@@ -54,34 +56,28 @@ def detect_incidents(session: Session, settings: Settings) -> DetectResponse:
     plans = _build_plans(events, settings)
     created = 0
     updated = 0
+    skipped = 0
     incidents: list[Incident] = []
     api_matches: list[DetectionMatch] = []
+    seen_incident_ids: set[uuid.UUID] = set()
+    persisted: list[tuple[uuid.UUID, str, _Plan]] = []
 
     for plan in plans:
-        incident = _existing_incident(session, plan)
-        if incident is None:
-            incident = Incident(
-                id=plan.incident_id,
-                title=plan.title,
-                severity=plan.severity,
-                status="open",
-                summary=plan.summary,
-                scenario=plan.scenario,
-                created_at=plan.created_at,
-            )
-            session.add(incident)
-            session.flush()
+        incident, outcome = _persist_plan(session, plan)
+        persisted.append((incident.id, outcome, plan))
+    session.flush()
+
+    for incident_id, outcome, plan in persisted:
+        if incident_id in seen_incident_ids:
+            continue
+        seen_incident_ids.add(incident_id)
+        if outcome == "created":
             created += 1
-        else:
-            incident.title = plan.title
-            incident.severity = plan.severity
-            incident.summary = plan.summary
-            if plan.scenario and not incident.scenario:
-                incident.scenario = plan.scenario
+        elif outcome == "updated":
             updated += 1
-        _ensure_links(session, incident.id, plan.event_ids)
-        session.flush()
-        loaded = incident_service.get_incident(session, incident.id)
+        else:
+            skipped += 1
+        loaded = incident_service.get_incident(session, incident_id)
         assert loaded is not None
         incidents.append(loaded)
         for match in plan.matches:
@@ -107,7 +103,64 @@ def detect_incidents(session: Session, settings: Settings) -> DetectResponse:
         incidents=[_to_read(item) for item in incidents],
         created=created,
         updated=updated,
+        skipped=skipped,
     )
+
+
+def _persist_plan(session: Session, plan: _Plan) -> tuple[Incident, str]:
+    incident = _existing_incident(session, plan)
+    if incident is None:
+        incident, created = _create_or_lock_existing(session, plan)
+        if created:
+            _ensure_links(session, incident.id, plan.event_ids)
+            return incident, "created"
+    _ensure_links(session, incident.id, plan.event_ids)
+    if incident.status in _CLOSED_STATUSES:
+        return incident, "skipped"
+    _apply_open_update(incident, plan)
+    return incident, "updated"
+
+
+def _create_or_lock_existing(session: Session, plan: _Plan) -> tuple[Incident, bool]:
+    incident = Incident(
+        id=plan.incident_id,
+        title=plan.title,
+        severity=plan.severity,
+        status="open",
+        summary=plan.summary,
+        scenario=plan.scenario,
+        created_at=plan.created_at,
+    )
+    try:
+        with session.begin_nested():
+            session.add(incident)
+            session.flush()
+        return incident, True
+    except IntegrityError:
+        if incident in session:
+            session.expunge(incident)
+        existing = session.get(Incident, plan.incident_id)
+        if existing is None:
+            existing = _existing_incident(session, plan)
+        if existing is None:
+            raise
+        return existing, False
+
+
+def _apply_open_update(incident: Incident, plan: _Plan) -> None:
+    incident.title = plan.title
+    incident.severity = _higher_severity(incident.severity, plan.severity)
+    incident.summary = plan.summary
+    if plan.scenario and not incident.scenario:
+        incident.scenario = plan.scenario
+
+
+def _higher_severity(current: str, candidate: Severity) -> Severity:
+    if _SEVERITY_RANK.get(candidate, 0) > _SEVERITY_RANK.get(current, 0):
+        return candidate
+    if current in _SEVERITY_RANK:
+        return current  # type: ignore[return-value]
+    return candidate
 
 
 def _to_read(incident: Incident) -> IncidentRead:
@@ -157,7 +210,7 @@ def _build_plans(events: list[SecurityEvent], settings: Settings) -> list[_Plan]
         *_auth_plans(events, auth_n, auth_window),
         *_outbound_plans(events, outbound_m, outbound_window, seeded),
     ]
-    return plans
+    return _merge_plans(plans)
 
 
 def _auth_plans(
@@ -354,19 +407,85 @@ def _cluster_by_window(
 
 
 def _merge_overlapping(windows: list[list[SecurityEvent]]) -> list[list[SecurityEvent]]:
-    if not windows:
-        return []
-    merged: list[dict[uuid.UUID, SecurityEvent]] = []
-    for window in windows:
-        ids = {event.id for event in window}
-        if merged and ids & set(merged[-1]):
-            for event in window:
-                merged[-1][event.id] = event
-        else:
-            merged.append({event.id: event for event in window})
-    return [
-        sorted(group.values(), key=lambda event: (event.timestamp, event.id)) for group in merged
+    groups = _union_find_groups([{event.id for event in window} for window in windows])
+    merged: dict[int, dict[uuid.UUID, SecurityEvent]] = defaultdict(dict)
+    for index, window in enumerate(windows):
+        root = groups[index]
+        for event in window:
+            merged[root][event.id] = event
+    clusters = [
+        sorted(group.values(), key=lambda event: (event.timestamp, event.id))
+        for group in merged.values()
     ]
+    clusters.sort(key=lambda cluster: (cluster[0].timestamp, cluster[0].id))
+    return clusters
+
+
+def _merge_plans(plans: list[_Plan]) -> list[_Plan]:
+    if len(plans) < 2:
+        return plans
+    groups = _union_find_groups([set(plan.event_ids) for plan in plans])
+    buckets: dict[int, list[_Plan]] = defaultdict(list)
+    for index, plan in enumerate(plans):
+        buckets[groups[index]].append(plan)
+    merged: list[_Plan] = []
+    for bucket in buckets.values():
+        bucket.sort(key=lambda plan: (plan.created_at, plan.fingerprint))
+        if len(bucket) == 1:
+            merged.append(bucket[0])
+            continue
+        matches_by_rule: dict[str, _Match] = {}
+        for plan in bucket:
+            for match in plan.matches:
+                existing = matches_by_rule.get(match.rule_id)
+                if existing is None:
+                    matches_by_rule[match.rule_id] = _Match(
+                        rule_id=match.rule_id,
+                        severity=match.severity,
+                        event_ids=list(match.event_ids),
+                        reason=match.reason,
+                        matched_threshold=match.matched_threshold,
+                        timestamp=match.timestamp,
+                    )
+                    continue
+                existing.event_ids = _unique_ids([*existing.event_ids, *match.event_ids])
+        primary = bucket[0]
+        strongest = max(bucket, key=lambda plan: _SEVERITY_RANK[plan.severity])
+        severity = primary.severity
+        for plan in bucket:
+            severity = _higher_severity(severity, plan.severity)
+        merged.append(
+            _Plan(
+                fingerprint=primary.fingerprint,
+                title=strongest.title,
+                severity=severity,
+                summary=strongest.summary,
+                scenario=primary.scenario or strongest.scenario,
+                created_at=strongest.created_at,
+                event_ids=_unique_ids([event_id for plan in bucket for event_id in plan.event_ids]),
+                matches=list(matches_by_rule.values()),
+            )
+        )
+    merged.sort(key=lambda plan: (plan.created_at, plan.fingerprint))
+    return merged
+
+
+def _union_find_groups(id_sets: list[set[uuid.UUID]]) -> list[int]:
+    parent = list(range(len(id_sets)))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    for left, left_ids in enumerate(id_sets):
+        if not left_ids:
+            continue
+        for right in range(left + 1, len(id_sets)):
+            if left_ids & id_sets[right]:
+                parent[find(right)] = find(left)
+    return [find(index) for index in range(len(id_sets))]
 
 
 def _shared_scenario(events: list[SecurityEvent]) -> str | None:

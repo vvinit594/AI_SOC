@@ -1,6 +1,8 @@
 import json
 import uuid
+from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.db.demo_data import BRUTE_SUCCESS_ID, INCIDENT_BRUTE_ID, OUTBOUND_IDS
@@ -177,6 +179,7 @@ def test_detect_is_idempotent(client: TestClient) -> None:
     assert first["created"] == 1
     assert second["created"] == 0
     assert second["updated"] == 1
+    assert second["skipped"] == 0
     assert first["incidents"][0]["id"] == second["incidents"][0]["id"]
     assert client.get("/api/incidents").json()["total"] == 1
 
@@ -225,3 +228,155 @@ def test_detect_does_not_duplicate_seeded_incidents(
     brute = client.get(f"/api/incidents/{INCIDENT_BRUTE_ID}").json()
     assert brute["id"] == str(INCIDENT_BRUTE_ID)
     assert brute["severity"] == "critical"
+
+
+def test_overlapping_ip_and_user_clusters_create_one_incident(client: TestClient) -> None:
+    events = [
+        *[_failure(minute, source_ip="192.0.2.10", username="alice") for minute in range(5)],
+        *[_failure(minute, source_ip="192.0.2.11", username="alice") for minute in range(5)],
+    ]
+    _upload_events(client, events)
+    body = client.post("/api/incidents/detect").json()
+    assert body["created"] == 1
+    assert body["updated"] == 0
+    assert client.get("/api/incidents").json()["total"] == 1
+    incident = body["incidents"][0]
+    assert len(incident["event_ids"]) == 10
+    assert {match["rule_id"] for match in body["matches"]} == {"R1"}
+
+
+def test_disjoint_ip_and_user_clusters_stay_separate(client: TestClient) -> None:
+    events = [
+        *[_failure(minute, source_ip="192.0.2.10", username="alice") for minute in range(5)],
+        *[_failure(minute, source_ip="192.0.2.11", username="bob") for minute in range(5)],
+    ]
+    _upload_events(client, events)
+    body = client.post("/api/incidents/detect").json()
+    assert body["created"] == 2
+    assert client.get("/api/incidents").json()["total"] == 2
+    assert sorted(len(item["event_ids"]) for item in body["incidents"]) == [5, 5]
+
+
+def test_chained_overlapping_windows_create_one_incident(client: TestClient) -> None:
+    _upload_events(client, [_failure(minute) for minute in range(9)])
+    body = client.post("/api/incidents/detect").json()
+    assert body["created"] == 1
+    assert client.get("/api/incidents").json()["total"] == 1
+    assert len(body["incidents"][0]["event_ids"]) == 9
+
+
+def test_gapped_windows_create_separate_incidents(client: TestClient) -> None:
+    events = [
+        *[_failure(minute) for minute in range(5)],
+        *[_failure(minute) for minute in range(12, 17)],
+    ]
+    _upload_events(client, events)
+    body = client.post("/api/incidents/detect").json()
+    assert body["created"] == 2
+    listed = client.get("/api/incidents").json()
+    assert listed["total"] == 2
+    assert sorted(len(item["event_ids"]) for item in body["incidents"]) == [5, 5]
+
+
+def test_resolved_incident_is_not_reopened(client: TestClient) -> None:
+    from app.db.models import Incident
+
+    _upload_events(client, [_failure(minute) for minute in range(5)])
+    first = client.post("/api/incidents/detect").json()
+    incident_id = uuid.UUID(first["incidents"][0]["id"])
+    session = client.app.state.session_factory()
+    try:
+        incident = session.get(Incident, incident_id)
+        assert incident is not None
+        incident.status = "resolved"
+        incident.summary = "Analyst closed after review"
+        incident.severity = "low"
+        incident.title = "Closed brute-force review"
+        session.commit()
+    finally:
+        session.close()
+
+    extra = _failure(5)
+    _upload_events(client, [extra])
+    second = client.post("/api/incidents/detect").json()
+    assert second["created"] == 0
+    assert second["updated"] == 0
+    assert second["skipped"] == 1
+    detail = client.get(f"/api/incidents/{incident_id}").json()
+    assert detail["status"] == "resolved"
+    assert detail["summary"] == "Analyst closed after review"
+    assert detail["severity"] == "low"
+    assert detail["title"] == "Closed brute-force review"
+    assert extra["id"] in detail["event_ids"]
+    assert client.get("/api/incidents").json()["total"] == 1
+
+
+def test_dismissed_incident_is_not_reopened(client: TestClient) -> None:
+    from app.db.models import Incident
+
+    _upload_events(client, [_failure(minute) for minute in range(5)])
+    first = client.post("/api/incidents/detect").json()
+    incident_id = uuid.UUID(first["incidents"][0]["id"])
+    session = client.app.state.session_factory()
+    try:
+        incident = session.get(Incident, incident_id)
+        assert incident is not None
+        incident.status = "dismissed"
+        incident.summary = "False positive"
+        session.commit()
+    finally:
+        session.close()
+
+    second = client.post("/api/incidents/detect").json()
+    assert second["created"] == 0
+    assert second["updated"] == 0
+    assert second["skipped"] == 1
+    detail = client.get(f"/api/incidents/{incident_id}").json()
+    assert detail["status"] == "dismissed"
+    assert detail["summary"] == "False positive"
+
+
+def test_detect_recovers_when_existing_row_is_missed(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.services import detection as detection_service
+
+    _upload_events(client, [_failure(minute) for minute in range(5)])
+    first = client.post("/api/incidents/detect").json()
+    incident_id = first["incidents"][0]["id"]
+    monkeypatch.setattr(detection_service, "_existing_incident", lambda _session, _plan: None)
+    second = client.post("/api/incidents/detect")
+    assert second.status_code == 200
+    body = second.json()
+    assert body["created"] == 0
+    assert body["updated"] == 1
+    assert body["skipped"] == 0
+    assert body["incidents"][0]["id"] == incident_id
+    assert client.get("/api/incidents").json()["total"] == 1
+
+
+def test_concurrent_detect_creates_one_incident(tmp_path: Path) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app.db.base import Base
+    from app.services.detection import detect_incidents
+
+    db_path = tmp_path / "concurrent-detect.db"
+    settings = build_settings(database_url=f"sqlite:///{db_path.resolve().as_posix()}")
+    application = create_app(settings)
+    Base.metadata.create_all(application.state.engine)
+    with TestClient(application) as client:
+        _upload_events(client, [_failure(minute) for minute in range(5)])
+
+        def _run() -> tuple[int, int, int]:
+            session = application.state.session_factory()
+            try:
+                result = detect_incidents(session, settings)
+                return result.created, result.updated, result.skipped
+            finally:
+                session.close()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(lambda _: _run(), range(2)))
+        assert client.get("/api/incidents").json()["total"] == 1
+        assert sum(created for created, _updated, _skipped in outcomes) <= 1

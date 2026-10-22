@@ -22,3 +22,4 @@ class DetectResponse(BaseModel):
     incidents: list[IncidentRead] = Field(default_factory=list)
     created: int = 0
     updated: int = 0
+    skipped: int = 0
