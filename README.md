@@ -95,7 +95,22 @@ The full list of variables and their purpose is documented in [`docs/environment
 
 ### Running locally
 
-Setup instructions for the frontend (Phase 2), backend (Phase 3), and database (Phase 4) will be added here as each phase lands. The final target is a single command:
+**Frontend (Phase 2)**
+
+```bash
+cd frontend
+cp .env.example .env.local   # optional; defaults match local development
+npm install
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000). The dashboard currently uses clearly labelled mock data. The FastAPI backend is not required until Phase 3.
+
+```bash
+npm run build    # production build check
+```
+
+Backend (Phase 3) and database (Phase 4) setup will be added here as those phases land. The final target is a single command:
 
 ```bash
 docker compose up --build
@@ -106,8 +121,8 @@ docker compose up --build
 | Phase | Focus | Status |
 |-------|-------|--------|
 | 0 | Define MVP scope | ✅ Done |
-| 1 | Development environment & repository | 🔄 In progress |
-| 2 | Next.js frontend foundation | ⏳ |
+| 1 | Development environment & repository | ✅ Done |
+| 2 | Next.js frontend foundation | ✅ Done |
 | 3 | FastAPI backend | ⏳ |
 | 4 | Database & event schemas | ⏳ |
 | 5 | Log ingestion & threat detection | ⏳ |
