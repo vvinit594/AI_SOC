@@ -29,6 +29,7 @@ class AgentFinding(BaseModel):
     techniques: list[str] = Field(default_factory=list)
     assessment_source: AssessmentSource = "deterministic_rules"
     llm_status: Literal["ok", "unavailable", "not_requested"] = "not_requested"
+    used_fallback: bool = False
 
 
 class ThreatIntelRecord(BaseModel):

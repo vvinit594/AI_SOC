@@ -8,6 +8,7 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from app.core.config import Settings
+from app.core.errors import exception_label
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +67,10 @@ class OpenAICompatibleLLM:
                 ValidationError,
             ) as exc:
                 last_error = exc
-                logger.warning("LLM structured output failed: %s", type(exc).__name__)
+                logger.warning("LLM structured output failed: %s", exception_label(exc))
         raise LLMError(
-            f"LLM structured output invalid or unavailable: {type(last_error).__name__}"
+            "LLM structured output invalid or unavailable: "
+            f"{exception_label(last_error) if last_error else 'Error'}"
         ) from last_error
 
 

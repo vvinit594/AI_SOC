@@ -3,11 +3,12 @@ from __future__ import annotations
 import ipaddress
 import logging
 from datetime import UTC, datetime, timedelta
-from typing import Protocol
+from typing import Any, Protocol
 
 import httpx
 
 from app.core.config import Settings
+from app.core.errors import exception_label
 from app.core.time import utc_now
 from app.schemas.investigations import ThreatIntelRecord
 
@@ -32,16 +33,39 @@ class ThreatIntelClient(Protocol):
     def lookup_ip(self, ip: str) -> ThreatIntelRecord: ...
 
 
+def _unavailable(ip: str, *, provider: str, summary: str) -> ThreatIntelRecord:
+    return ThreatIntelRecord(
+        indicator=ip,
+        status="unavailable",
+        provider=provider,
+        source=provider,
+        fetched_at=utc_now(),
+        summary=summary,
+    )
+
+
 class NoneThreatIntel:
     def lookup_ip(self, ip: str) -> ThreatIntelRecord:
-        return ThreatIntelRecord(
-            indicator=ip,
-            status="unavailable",
+        return _unavailable(
+            ip,
             provider="none",
-            source="none",
-            fetched_at=utc_now(),
             summary="Threat-intelligence provider is disabled; no reputation lookup was performed.",
         )
+
+
+def _parse_score(value: object) -> tuple[int | None, str]:
+    if value is None or isinstance(value, bool):
+        return None, "unknown"
+    if isinstance(value, int | float):
+        score = int(value)
+        return score, "suspicious" if score >= 25 else "unknown"
+    if isinstance(value, str):
+        try:
+            score = int(value.strip())
+        except ValueError:
+            return None, "unknown"
+        return score, "suspicious" if score >= 25 else "unknown"
+    return None, "unknown"
 
 
 class AbuseIPDBClient:
@@ -51,12 +75,9 @@ class AbuseIPDBClient:
 
     def lookup_ip(self, ip: str) -> ThreatIntelRecord:
         if not self._api_key:
-            return ThreatIntelRecord(
-                indicator=ip,
-                status="unavailable",
+            return _unavailable(
+                ip,
                 provider="abuseipdb",
-                source="abuseipdb",
-                fetched_at=utc_now(),
                 summary="AbuseIPDB API key is not configured.",
             )
         try:
@@ -67,8 +88,13 @@ class AbuseIPDBClient:
                 timeout=self._timeout,
             )
             response.raise_for_status()
-            payload = response.json().get("data", {})
-            score = payload.get("abuseConfidenceScore")
+            body: Any = response.json()
+            if not isinstance(body, dict):
+                raise TypeError("malformed AbuseIPDB envelope")
+            payload = body.get("data")
+            if not isinstance(payload, dict):
+                raise TypeError("malformed AbuseIPDB data")
+            score, classification = _parse_score(payload.get("abuseConfidenceScore"))
             return ThreatIntelRecord(
                 indicator=ip,
                 status="ok",
@@ -76,19 +102,14 @@ class AbuseIPDBClient:
                 source="abuseipdb",
                 fetched_at=utc_now(),
                 summary="AbuseIPDB returned a reputation score for this indicator.",
-                score=int(score) if score is not None else None,
-                classification="suspicious"
-                if isinstance(score, int | float) and score >= 25
-                else "unknown",
+                score=score,
+                classification=classification,
             )
-        except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
-            logger.warning("AbuseIPDB lookup failed for %s: %s", ip, type(exc).__name__)
-            return ThreatIntelRecord(
-                indicator=ip,
-                status="unavailable",
+        except Exception as exc:
+            logger.warning("AbuseIPDB lookup failed: %s", exception_label(exc))
+            return _unavailable(
+                ip,
                 provider="abuseipdb",
-                source="abuseipdb",
-                fetched_at=utc_now(),
                 summary="AbuseIPDB lookup failed or timed out; reputation is unavailable.",
             )
 
@@ -107,7 +128,8 @@ class CachingThreatIntel:
             if now - stored_at < self._ttl:
                 return record.model_copy(update={"cache_hit": True})
         record = self._inner.lookup_ip(ip)
-        self._cache[ip] = (now, record)
+        if record.status == "ok":
+            self._cache[ip] = (now, record)
         return record
 
 

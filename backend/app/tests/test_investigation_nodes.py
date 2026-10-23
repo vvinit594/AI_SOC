@@ -127,9 +127,9 @@ def test_threat_intelligence_node_survives_provider_exception() -> None:
         {"indicators": ["192.0.2.10"], "event_ids": []},
         RunnableConfig(configurable={"recorder": recorder, "intel": Boom()}),
     )
-    assert result["threat_intel"] == []
-    assert "threat_intelligence" in result["node_errors"]
-    assert "threat_intelligence" in recorder.failed
+    assert result["threat_intel"][0]["status"] == "unavailable"
+    assert "threat_intelligence" in recorder.completed
+    assert "threat_intelligence" not in recorder.failed
 
 
 def test_analysis_node_maps_brute_force_from_evidence() -> None:
@@ -178,7 +178,7 @@ def test_analysis_node_maps_brute_force_from_evidence() -> None:
     assert "assessment" in kinds
 
 
-def test_analysis_filters_invented_techniques_and_event_ids() -> None:
+def test_analysis_falls_back_on_invalid_llm_finding() -> None:
     recorder = MemoryRecorder()
     real_id = uuid.uuid4()
     invented_id = uuid.uuid4()
@@ -203,9 +203,13 @@ def test_analysis_filters_invented_techniques_and_event_ids() -> None:
         RunnableConfig(configurable={"recorder": recorder, "llm": InventLLM()}),
     )
     analysis = result["analysis"]
-    assert analysis["techniques"] == ["T1110"]
+    assert analysis["techniques"] == []
     assert analysis["evidence_event_ids"] == [str(real_id)]
-    assert analysis["assessment_source"] == "llm"
+    assert analysis["assessment_source"] == "deterministic_rules"
+    assert analysis["llm_status"] == "unavailable"
+    assert analysis["used_fallback"] is True
+    assert "analysis" in recorder.completed
+    assert "analysis" not in recorder.failed
 
 
 def test_response_planner_actions_are_simulated() -> None:
@@ -260,7 +264,8 @@ def test_abuseipdb_failures_are_unavailable(monkeypatch) -> None:
     first = cached.lookup_ip("8.8.8.8")
     second = cached.lookup_ip("8.8.8.8")
     assert first.status == "unavailable"
-    assert second.cache_hit is True
+    assert second.status == "unavailable"
+    assert second.cache_hit is False
 
 
 def test_openai_invalid_json_raises_llm_error(monkeypatch) -> None:
@@ -278,6 +283,180 @@ def test_openai_invalid_json_raises_llm_error(monkeypatch) -> None:
         raise AssertionError("expected LLMError")
     except LLMError as exc:
         assert "invalid" in str(exc).lower() or "unavailable" in str(exc).lower()
+
+
+def test_malformed_abuseipdb_body_is_unavailable(monkeypatch) -> None:
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> object:
+            return {"data": ["not-a-dict"]}
+
+    monkeypatch.setattr("app.services.threat_intel.httpx.get", lambda *_a, **_k: FakeResponse())
+    record = AbuseIPDBClient("key", 1).lookup_ip("8.8.8.8")
+    assert record.status == "unavailable"
+
+
+def test_unknown_score_is_not_treated_as_malicious(monkeypatch) -> None:
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {"data": {"abuseConfidenceScore": None}}
+
+    monkeypatch.setattr("app.services.threat_intel.httpx.get", lambda *_a, **_k: FakeResponse())
+    record = AbuseIPDBClient("key", 1).lookup_ip("8.8.8.8")
+    assert record.status == "ok"
+    assert record.score is None
+    assert record.classification == "unknown"
+
+
+def test_non_numeric_score_is_unknown(monkeypatch) -> None:
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {"data": {"abuseConfidenceScore": True}}
+
+    monkeypatch.setattr("app.services.threat_intel.httpx.get", lambda *_a, **_k: FakeResponse())
+    record = AbuseIPDBClient("key", 1).lookup_ip("8.8.8.8")
+    assert record.status == "ok"
+    assert record.score is None
+    assert record.classification == "unknown"
+
+
+def test_successful_intel_is_cached(monkeypatch) -> None:
+    calls = {"n": 0}
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            calls["n"] += 1
+            return {"data": {"abuseConfidenceScore": 10}}
+
+    monkeypatch.setattr("app.services.threat_intel.httpx.get", lambda *_a, **_k: FakeResponse())
+    client = CachingThreatIntel(AbuseIPDBClient("key", 1), ttl_seconds=60)
+    first = client.lookup_ip("8.8.8.8")
+    second = client.lookup_ip("8.8.8.8")
+    assert first.status == "ok"
+    assert second.cache_hit is True
+    assert calls["n"] == 1
+
+
+def test_timeout_is_unavailable_and_not_cached(monkeypatch) -> None:
+    calls = {"n": 0}
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        calls["n"] += 1
+        raise httpx.TimeoutException("timed out")
+
+    monkeypatch.setattr("app.services.threat_intel.httpx.get", boom)
+    client = CachingThreatIntel(AbuseIPDBClient("key", 1), ttl_seconds=60)
+    first = client.lookup_ip("8.8.8.8")
+    second = client.lookup_ip("8.8.8.8")
+    assert first.status == "unavailable"
+    assert second.cache_hit is False
+    assert calls["n"] == 2
+
+
+def test_documentation_ip_is_not_classified_malicious() -> None:
+    from app.agents.tools import lookup_ip_reputation
+
+    class Hot:
+        def lookup_ip(self, ip: str) -> ThreatIntelRecord:
+            return ThreatIntelRecord(
+                indicator=ip,
+                status="ok",
+                provider="abuseipdb",
+                source="abuseipdb",
+                fetched_at=datetime.now(UTC),
+                summary="high score",
+                score=100,
+                classification="suspicious",
+            )
+
+    record = lookup_ip_reputation(Hot(), "192.0.2.10")
+    assert record.classification == "documentation"
+    assert record.score == 100
+    assert "RFC 5737" in record.summary
+
+
+def test_provider_errors_do_not_log_secrets(monkeypatch, caplog) -> None:
+    import logging
+
+    caplog.set_level(logging.WARNING)
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise httpx.ConnectError("Authorization: Bearer sk-secret-key")
+
+    monkeypatch.setattr("app.services.threat_intel.httpx.get", boom)
+    AbuseIPDBClient("sk-secret-key", 1).lookup_ip("8.8.8.8")
+    assert "sk-secret-key" not in caplog.text
+    assert "Bearer" not in caplog.text
+
+
+def test_valid_llm_finding_is_kept() -> None:
+    recorder = MemoryRecorder()
+    real_id = uuid.uuid4()
+
+    class OkLLM:
+        def generate(self, **_kwargs: object) -> AgentFinding:
+            return AgentFinding(
+                finding="ok",
+                evidence_event_ids=[real_id],
+                confidence="medium",
+                reasoning_summary="grounded",
+                recommended_next_step="plan",
+                techniques=["T1110"],
+            )
+
+    result = analysis_node(
+        {
+            "events": [{"id": str(real_id), "event_type": "login_failure"}],
+            "event_ids": [str(real_id)],
+            "threat_intel": [],
+        },
+        RunnableConfig(configurable={"recorder": recorder, "llm": OkLLM()}),
+    )
+    assert result["analysis"]["assessment_source"] == "llm"
+    assert result["analysis"]["used_fallback"] is False
+    assert result["analysis"]["llm_status"] == "ok"
+
+
+def test_analysis_falls_back_on_invalid_fact_event_ids() -> None:
+    from app.schemas.investigations import Fact
+
+    recorder = MemoryRecorder()
+    real_id = uuid.uuid4()
+    invented_id = uuid.uuid4()
+
+    class InventFacts:
+        def generate(self, **_kwargs: object) -> AgentFinding:
+            return AgentFinding(
+                finding="ok",
+                evidence_event_ids=[real_id],
+                confidence="medium",
+                reasoning_summary="grounded",
+                recommended_next_step="plan",
+                techniques=["T1110"],
+                facts=[Fact(kind="verified", statement="x", event_ids=[invented_id])],
+            )
+
+    result = analysis_node(
+        {
+            "events": [{"id": str(real_id), "event_type": "login_failure"}],
+            "event_ids": [str(real_id)],
+            "threat_intel": [],
+        },
+        RunnableConfig(configurable={"recorder": recorder, "llm": InventFacts()}),
+    )
+    assert result["analysis"]["used_fallback"] is True
+    assert result["analysis"]["assessment_source"] == "deterministic_rules"
 
 
 def test_failed_investigation_can_be_retried(client: TestClient) -> None:

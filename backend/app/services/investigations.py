@@ -1,17 +1,19 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.agents.graph import run_investigation_graph
 from app.agents.nodes import NODE_NAMES
 from app.core.config import Settings
+from app.core.errors import exception_label
 from app.core.time import utc_now
-from app.db.models import AgentRun, ResponseAction
+from app.db.models import AgentRun, Incident, ResponseAction
 from app.schemas.enums import AgentName, AgentRunStatus
 from app.schemas.investigations import (
     AgentRunRead,
@@ -20,10 +22,14 @@ from app.schemas.investigations import (
     RecommendedAction,
 )
 from app.services import incidents as incident_service
+from app.services.incident_lock import lock_incident
 from app.services.llm import build_llm_client
 from app.services.threat_intel import build_threat_intel_client
 
+logger = logging.getLogger(__name__)
+
 _CLOSED = frozenset({"resolved", "dismissed"})
+_IN_FLIGHT = frozenset({"queued", "running"})
 
 
 class InvestigationError(ValueError):
@@ -104,55 +110,66 @@ def start_investigation(
     if incident.status in _CLOSED:
         raise InvestigationError("Closed incidents cannot be investigated", status_code=409)
 
-    existing = _latest_investigation(session, incident_id)
-    if existing is not None and existing.status != "failed":
-        return InvestigateResponse(investigation=existing, created=False)
+    with lock_incident(session, incident_id):
+        session.refresh(incident)
+        if incident.status in _CLOSED:
+            raise InvestigationError("Closed incidents cannot be investigated", status_code=409)
 
-    investigation_id = uuid.uuid4()
-    recorder = RunRecorder(session, investigation_id, incident_id)
-    try:
-        _queue_nodes(session, investigation_id, incident_id)
-        if incident.status == "open":
-            incident.status = "investigating"
-        session.commit()
+        existing = _latest_investigation(session, incident_id)
+        if existing is not None and existing.status == "completed":
+            return InvestigateResponse(investigation=existing, created=False)
+        if existing is not None and existing.status in _IN_FLIGHT:
+            _fail_open_nodes(session, existing.id, "StaleInvestigation")
 
-        def persist_actions(actions: list[RecommendedAction]) -> None:
-            _store_actions(session, incident_id, actions)
-
-        run_investigation_graph(
-            {"incident_id": str(incident_id), "investigation_id": str(investigation_id)},
-            {
-                "configurable": {
-                    "session": session,
-                    "settings": settings,
-                    "recorder": recorder,
-                    "llm": build_llm_client(settings, llm),
-                    "intel": build_threat_intel_client(settings, intel),
-                    "incident": {
-                        "id": str(incident.id),
-                        "title": incident.title,
-                        "severity": incident.severity,
-                        "status": incident.status,
-                        "summary": incident.summary,
-                        "scenario": incident.scenario,
-                    },
-                    "persist_actions": persist_actions,
-                }
-            },
-        )
-        loaded = get_investigation(session, investigation_id)
-        assert loaded is not None
-        if loaded.status == "completed" and incident.status == "investigating":
-            incident.status = "awaiting_approval"
+        investigation_id = uuid.uuid4()
+        recorder = RunRecorder(session, investigation_id, incident_id)
+        try:
+            _queue_nodes(session, investigation_id, incident_id)
+            if incident.status == "open":
+                incident.status = "investigating"
             session.commit()
+
+            def persist_actions(actions: list[RecommendedAction]) -> None:
+                _store_actions(session, incident_id, actions)
+
+            run_investigation_graph(
+                {"incident_id": str(incident_id), "investigation_id": str(investigation_id)},
+                {
+                    "configurable": {
+                        "session": session,
+                        "settings": settings,
+                        "recorder": recorder,
+                        "llm": build_llm_client(settings, llm),
+                        "intel": build_threat_intel_client(settings, intel),
+                        "incident": {
+                            "id": str(incident.id),
+                            "title": incident.title,
+                            "severity": incident.severity,
+                            "status": incident.status,
+                            "summary": incident.summary,
+                            "scenario": incident.scenario,
+                        },
+                        "persist_actions": persist_actions,
+                    }
+                },
+            )
             loaded = get_investigation(session, investigation_id)
             assert loaded is not None
-        return InvestigateResponse(investigation=loaded, created=True)
-    except InvestigationError:
-        raise
-    except Exception as exc:
-        _fail_open_nodes(session, investigation_id, str(exc))
-        raise InvestigationError("Investigation workflow failed", status_code=500) from exc
+            if loaded.status == "completed" and incident.status == "investigating":
+                incident.status = "awaiting_approval"
+                session.commit()
+                loaded = get_investigation(session, investigation_id)
+                assert loaded is not None
+            if loaded.status == "failed":
+                _reopen_if_investigating(session, incident)
+            return InvestigateResponse(investigation=loaded, created=True)
+        except InvestigationError:
+            raise
+        except Exception as exc:
+            logger.warning("Investigation workflow failed: %s", exception_label(exc))
+            _fail_open_nodes(session, investigation_id, exception_label(exc))
+            _reopen_if_investigating(session, incident)
+            raise InvestigationError("Investigation workflow failed", status_code=500) from exc
 
 
 def _queue_nodes(session: Session, investigation_id: uuid.UUID, incident_id: uuid.UUID) -> None:
@@ -173,22 +190,29 @@ def _latest_investigation(session: Session, incident_id: uuid.UUID) -> Investiga
     rows = list(session.scalars(select(AgentRun).where(AgentRun.incident_id == incident_id)).all())
     if not rows:
         return None
-    latest_id = max(
-        rows,
-        key=lambda row: (row.started_at or row.completed_at or utc_now(), row.id),
-    ).investigation_id
+    groups: dict[uuid.UUID, list[AgentRun]] = {}
+    for row in rows:
+        groups.setdefault(row.investigation_id, []).append(row)
+
+    def _sort_key(investigation_id: uuid.UUID) -> tuple:
+        members = groups[investigation_id]
+        timestamps = [item.completed_at or item.started_at for item in members]
+        latest = max((stamp for stamp in timestamps if stamp is not None), default=utc_now())
+        return (latest, investigation_id)
+
+    latest_id = max(groups, key=_sort_key)
     return get_investigation(session, latest_id)
 
 
 def _to_read(investigation_id: uuid.UUID, rows: list[AgentRun]) -> InvestigationRead:
     statuses = {row.status for row in rows}
     status: AgentRunStatus
-    if "running" in statuses or "queued" in statuses:
-        status = "running" if "running" in statuses else "queued"
-    elif "failed" in statuses and "completed" not in statuses:
+    if "failed" in statuses:
         status = "failed"
-    elif "failed" in statuses:
-        status = "failed"
+    elif "running" in statuses:
+        status = "running"
+    elif "queued" in statuses:
+        status = "queued"
     else:
         status = "completed"
     sources = [
@@ -209,13 +233,14 @@ def _to_read(investigation_id: uuid.UUID, rows: list[AgentRun]) -> Investigation
 def _store_actions(
     session: Session, incident_id: uuid.UUID, actions: list[RecommendedAction]
 ) -> None:
-    existing = list(
-        session.scalars(
-            select(ResponseAction).where(ResponseAction.incident_id == incident_id)
-        ).all()
+    session.execute(
+        delete(ResponseAction).where(
+            ResponseAction.incident_id == incident_id,
+            ResponseAction.approval_status == "proposed",
+            ResponseAction.execution_status == "not_executed",
+            ResponseAction.simulated.is_(True),
+        )
     )
-    if existing:
-        return
     for action in actions:
         session.add(
             ResponseAction(
@@ -246,3 +271,12 @@ def _fail_open_nodes(session: Session, investigation_id: uuid.UUID, error: str) 
         session.commit()
     except SQLAlchemyError:
         session.rollback()
+
+
+def _reopen_if_investigating(session: Session, incident: Incident) -> None:
+    if getattr(incident, "status", None) == "investigating":
+        incident.status = "open"
+        try:
+            session.commit()
+        except SQLAlchemyError:
+            session.rollback()

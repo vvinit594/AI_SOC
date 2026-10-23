@@ -104,6 +104,8 @@ def test_end_to_end_investigation_scenario_a(client: TestClient) -> None:
     techniques = analysis["structured_output"]["techniques"]
     assert "T1110" in techniques
     assert "T1078" in techniques
+    assert analysis["structured_output"]["llm_status"] == "not_requested"
+    assert analysis["structured_output"]["used_fallback"] is False
     intel = next(
         node for node in investigation["nodes"] if node["agent_name"] == "threat_intelligence"
     )
@@ -203,6 +205,7 @@ def test_invalid_llm_output_falls_back_to_deterministic(client: TestClient, monk
     assert analysis["status"] == "completed"
     assert analysis["structured_output"]["llm_status"] == "unavailable"
     assert analysis["structured_output"]["assessment_source"] == "deterministic_rules"
+    assert analysis["structured_output"]["used_fallback"] is True
     assert "T1071" in analysis["structured_output"]["techniques"]
     monkeypatch.setattr(service, "build_llm_client", original)
 
@@ -211,3 +214,135 @@ def test_sse_stream_is_not_implemented(client: TestClient) -> None:
     response = client.get(f"/api/investigations/{uuid.uuid4()}/stream")
     assert response.status_code == 501
     assert "Phase 7" in response.json()["detail"]
+
+
+def test_stale_running_investigation_is_retried(client: TestClient) -> None:
+    from app.agents.nodes import NODE_NAMES
+    from app.db.models import AgentRun
+
+    incident_id = _open_incident(client)
+    stale_id = uuid.uuid4()
+    session = client.app.state.session_factory()
+    try:
+        for index, name in enumerate(NODE_NAMES):
+            session.add(
+                AgentRun(
+                    investigation_id=stale_id,
+                    incident_id=uuid.UUID(incident_id),
+                    agent_name=name,
+                    status="running" if index == 0 else "queued",
+                    structured_output={},
+                )
+            )
+        session.commit()
+    finally:
+        session.close()
+    response = client.post(f"/api/incidents/{incident_id}/investigate")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["created"] is True
+    assert body["investigation"]["id"] != str(stale_id)
+    assert body["investigation"]["status"] == "completed"
+    session = client.app.state.session_factory()
+    try:
+        stale = list(
+            session.scalars(select(AgentRun).where(AgentRun.investigation_id == stale_id)).all()
+        )
+        assert stale
+        assert all(row.status == "failed" for row in stale)
+    finally:
+        session.close()
+
+
+def test_retry_replaces_proposed_actions(client: TestClient) -> None:
+    from app.agents.nodes import NODE_NAMES
+    from app.db.models import AgentRun, ResponseAction
+
+    incident_id = _open_incident(client)
+    previous = uuid.uuid4()
+    session = client.app.state.session_factory()
+    try:
+        for name in NODE_NAMES:
+            session.add(
+                AgentRun(
+                    investigation_id=previous,
+                    incident_id=uuid.UUID(incident_id),
+                    agent_name=name,
+                    status="failed",
+                    structured_output={},
+                    error="RuntimeError",
+                )
+            )
+        session.add(
+            ResponseAction(
+                incident_id=uuid.UUID(incident_id),
+                action_type="force_password_reset",
+                target="stale_user",
+                reason="leftover from failed run",
+                risk_level="medium",
+                approval_status="proposed",
+                execution_status="not_executed",
+                simulated=True,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+    response = client.post(f"/api/incidents/{incident_id}/investigate")
+    assert response.status_code == 200, response.text
+    session = client.app.state.session_factory()
+    try:
+        stored = list(
+            session.scalars(
+                select(ResponseAction).where(ResponseAction.incident_id == uuid.UUID(incident_id))
+            ).all()
+        )
+        assert stored
+        assert all(item.target != "stale_user" for item in stored)
+        assert all(
+            item.simulated is True and item.execution_status == "not_executed" for item in stored
+        )
+        types = {item.action_type for item in stored}
+        assert "monitor" in types
+        assert "force_password_reset" not in types
+    finally:
+        session.close()
+
+
+def test_partial_failure_then_retry_succeeds(client: TestClient, monkeypatch) -> None:
+    from app.agents import nodes as agent_nodes
+
+    incident_id = _open_incident(client)
+
+    def _boom(*_args: object, **_kwargs: object) -> list:
+        raise RuntimeError("password=super-secret raw_message=Accepted password for root")
+
+    monkeypatch.setattr(agent_nodes, "search_incident_events", _boom)
+    failed = client.post(f"/api/incidents/{incident_id}/investigate")
+    assert failed.status_code == 500
+    session = client.app.state.session_factory()
+    try:
+        from app.db.models import AgentRun, Incident
+
+        incident = session.get(Incident, uuid.UUID(incident_id))
+        assert incident is not None
+        assert incident.status == "open"
+        errors = [
+            row.error
+            for row in session.scalars(
+                select(AgentRun).where(AgentRun.incident_id == uuid.UUID(incident_id))
+            ).all()
+        ]
+        assert errors
+        assert all(error == "RuntimeError" for error in errors if error)
+        assert all(
+            error is None or ("super-secret" not in error and "Accepted password" not in error)
+            for error in errors
+        )
+    finally:
+        session.close()
+    monkeypatch.undo()
+    retry = client.post(f"/api/incidents/{incident_id}/investigate")
+    assert retry.status_code == 200, retry.text
+    assert retry.json()["created"] is True
+    assert retry.json()["investigation"]["status"] == "completed"

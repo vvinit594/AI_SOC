@@ -17,7 +17,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.exc import OperationalError
 
 from app.core.config import Settings, get_settings
@@ -210,3 +210,64 @@ def test_postgres_phase6_investigation_persists_agent_runs(postgres_client: Test
     assert fetched.status_code == 200
     assert fetched.json()["incident_id"] == outbound["id"]
     assert detect["created"] in {0, 1}
+
+
+def test_postgres_concurrent_investigate_is_idempotent(postgres_client: TestClient) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app.db.models import ResponseAction
+    from app.tests.test_investigations import _open_incident
+
+    client = postgres_client
+    incident_id = _open_incident(client)
+
+    def _run() -> object:
+        return client.post(f"/api/incidents/{incident_id}/investigate")
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(pool.map(lambda _: _run(), range(2)))
+    assert all(item.status_code == 200 for item in responses), [item.text for item in responses]
+    bodies = [item.json() for item in responses]
+    investigation_ids = {item["investigation"]["id"] for item in bodies}
+    assert len(investigation_ids) == 1
+    assert sum(1 for item in bodies if item["created"]) == 1
+    session = client.app.state.session_factory()
+    try:
+        actions = list(
+            session.scalars(
+                select(ResponseAction).where(ResponseAction.incident_id == uuid.UUID(incident_id))
+            ).all()
+        )
+        assert actions
+        assert len(actions) == len({(item.action_type, item.target) for item in actions})
+    finally:
+        session.close()
+
+
+def test_postgres_stale_running_then_retry(postgres_client: TestClient) -> None:
+    from app.agents.nodes import NODE_NAMES
+    from app.db.models import AgentRun
+    from app.tests.test_investigations import _open_incident
+
+    client = postgres_client
+    incident_id = _open_incident(client)
+    stale_id = uuid.uuid4()
+    session = client.app.state.session_factory()
+    try:
+        for index, name in enumerate(NODE_NAMES):
+            session.add(
+                AgentRun(
+                    investigation_id=stale_id,
+                    incident_id=uuid.UUID(incident_id),
+                    agent_name=name,
+                    status="running" if index == 0 else "queued",
+                    structured_output={},
+                )
+            )
+        session.commit()
+    finally:
+        session.close()
+    response = client.post(f"/api/incidents/{incident_id}/investigate")
+    assert response.status_code == 200, response.text
+    assert response.json()["created"] is True
+    assert response.json()["investigation"]["id"] != str(stale_id)
