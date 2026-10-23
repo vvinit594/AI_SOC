@@ -1,4 +1,5 @@
 import { API_BASE_URL } from "@/lib/constants";
+import type { AgentName, AgentRunStatus } from "@/lib/types";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -68,4 +69,30 @@ export async function apiGet<T>(path: string, signal?: AbortSignal): Promise<T> 
 
 export function getHealth(signal?: AbortSignal): Promise<HealthResponse> {
   return apiGet<HealthResponse>("/health", signal);
+}
+
+export type InvestigationApiNode = {
+  agent_name: AgentName;
+  status: AgentRunStatus;
+  started_at: string | null;
+  completed_at: string | null;
+  structured_output: Record<string, unknown>;
+  error: string | null;
+};
+
+export type InvestigationApiResponse = {
+  id: string;
+  incident_id: string;
+  status: AgentRunStatus;
+  nodes: InvestigationApiNode[];
+};
+
+export function getInvestigationApi(
+  investigationId: string,
+  signal?: AbortSignal,
+): Promise<InvestigationApiResponse> {
+  return apiGet<InvestigationApiResponse>(
+    `/api/investigations/${investigationId}`,
+    signal,
+  );
 }

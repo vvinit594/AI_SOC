@@ -79,3 +79,23 @@ class InvestigationRead(BaseModel):
 class InvestigateResponse(BaseModel):
     investigation: InvestigationRead
     created: bool
+
+
+ProgressEventName = Literal[
+    "connected",
+    "node_started",
+    "node_completed",
+    "node_failed",
+    "investigation_completed",
+    "investigation_failed",
+]
+
+
+class InvestigationProgressEvent(BaseModel):
+    investigation_id: uuid.UUID
+    event: ProgressEventName
+    agent_name: AgentName | None = None
+    status: AgentRunStatus | Literal["connected"]
+    timestamp: datetime
+    error: str | None = None
+    event_id: str

@@ -271,3 +271,80 @@ def test_postgres_stale_running_then_retry(postgres_client: TestClient) -> None:
     assert response.status_code == 200, response.text
     assert response.json()["created"] is True
     assert response.json()["investigation"]["id"] != str(stale_id)
+
+
+def test_postgres_sse_replays_and_two_clients(postgres_client: TestClient) -> None:
+    from app.tests.test_investigations import _open_incident
+    from app.tests.test_sse import _parse_sse, _read_until_terminal
+
+    client = postgres_client
+    incident_id = _open_incident(client)
+    created = client.post(f"/api/incidents/{incident_id}/investigate")
+    assert created.status_code == 200, created.text
+    investigation_id = created.json()["investigation"]["id"]
+    first = _parse_sse(_read_until_terminal(client, investigation_id))
+    second = _parse_sse(_read_until_terminal(client, investigation_id))
+    assert first[0]["event"] == "connected"
+    assert first[-1]["event"] == "investigation_completed"
+    assert [item["event"] for item in first] == [item["event"] for item in second]
+    assert sum(1 for item in first if item["event"] == "node_completed") == 4
+
+
+def test_postgres_sse_live_during_investigate(postgres_client: TestClient) -> None:
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    from sqlalchemy import select
+
+    from app.db.models import AgentRun
+    from app.services.investigations import RunRecorder
+    from app.tests.test_investigations import _open_incident
+    from app.tests.test_sse import _parse_sse, _read_until_terminal
+
+    client = postgres_client
+    incident_id = _open_incident(client)
+    original = RunRecorder.start
+
+    def _slow_start(self: RunRecorder, agent_name: str) -> AgentRun:
+        run = original(self, agent_name)
+        time.sleep(0.05)
+        return run
+
+    RunRecorder.start = _slow_start  # type: ignore[method-assign]
+    ready = threading.Event()
+    try:
+
+        def _investigate() -> int:
+            ready.set()
+            return client.post(f"/api/incidents/{incident_id}/investigate").status_code
+
+        def _stream() -> str:
+            ready.wait(timeout=5)
+            investigation_id = None
+            for _ in range(80):
+                session = client.app.state.session_factory()
+                try:
+                    row = session.scalar(
+                        select(AgentRun).where(AgentRun.incident_id == uuid.UUID(incident_id))
+                    )
+                    if row is not None:
+                        investigation_id = str(row.investigation_id)
+                        break
+                finally:
+                    session.close()
+                time.sleep(0.025)
+            assert investigation_id is not None
+            return _read_until_terminal(client, investigation_id, timeout=20)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            stream_future = pool.submit(_stream)
+            status = pool.submit(_investigate).result(timeout=25)
+            body = stream_future.result(timeout=25)
+    finally:
+        RunRecorder.start = original  # type: ignore[method-assign]
+    assert status == 200
+    events = _parse_sse(body)
+    assert events[0]["event"] == "connected"
+    assert events[-1]["event"] == "investigation_completed"
+    assert sum(1 for item in events if item["event"] == "node_started") == 4

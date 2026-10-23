@@ -24,6 +24,7 @@ from app.schemas.investigations import (
 from app.services import incidents as incident_service
 from app.services.incident_lock import lock_incident
 from app.services.llm import build_llm_client
+from app.services.progress import notify_progress
 from app.services.threat_intel import build_threat_intel_client
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,7 @@ class RunRecorder:
         run.started_at = utc_now()
         run.error = None
         self.session.commit()
+        notify_progress(self.investigation_id)
         return run
 
     def complete(self, agent_name: AgentName, output: dict[str, Any]) -> AgentRun:
@@ -61,6 +63,7 @@ class RunRecorder:
         run.structured_output = output
         run.completed_at = utc_now()
         self.session.commit()
+        notify_progress(self.investigation_id)
         return run
 
     def fail(self, agent_name: AgentName, error: str) -> AgentRun:
@@ -69,6 +72,7 @@ class RunRecorder:
         run.error = error
         run.completed_at = utc_now()
         self.session.commit()
+        notify_progress(self.investigation_id)
         return run
 
     def _row(self, agent_name: AgentName) -> AgentRun:
@@ -128,6 +132,7 @@ def start_investigation(
             if incident.status == "open":
                 incident.status = "investigating"
             session.commit()
+            notify_progress(investigation_id)
 
             def persist_actions(actions: list[RecommendedAction]) -> None:
                 _store_actions(session, incident_id, actions)
@@ -162,6 +167,7 @@ def start_investigation(
                 assert loaded is not None
             if loaded.status == "failed":
                 _reopen_if_investigating(session, incident)
+            notify_progress(investigation_id)
             return InvestigateResponse(investigation=loaded, created=True)
         except InvestigationError:
             raise
@@ -169,6 +175,7 @@ def start_investigation(
             logger.warning("Investigation workflow failed: %s", exception_label(exc))
             _fail_open_nodes(session, investigation_id, exception_label(exc))
             _reopen_if_investigating(session, incident)
+            notify_progress(investigation_id)
             raise InvestigationError("Investigation workflow failed", status_code=500) from exc
 
 
@@ -269,6 +276,7 @@ def _fail_open_nodes(session: Session, investigation_id: uuid.UUID, error: str) 
             row.completed_at = now
     try:
         session.commit()
+        notify_progress(investigation_id)
     except SQLAlchemyError:
         session.rollback()
 

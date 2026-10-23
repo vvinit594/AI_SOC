@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { AgentStatusList } from "@/components/investigations/agent-status";
 import { EvidencePanel } from "@/components/investigations/evidence-panel";
+import { LiveAgentWorkflow } from "@/components/investigations/live-agent-workflow";
 import { InvestigationTimeline } from "@/components/investigations/timeline";
 import { PageHeader } from "@/components/layout/page-header";
 import { MockBanner } from "@/components/shared/mock-banner";
@@ -50,7 +50,7 @@ export default async function InvestigationPage({
     <div>
       <PageHeader
         title={`Investigation · ${incident.title}`}
-        description="LangGraph nodes will stream real status over SSE in Phase 7. This view shows the four frozen agent roles and their structured outputs."
+        description="Each LangGraph node reports queued, running, completed, or failed over SSE. Connecting after a run has started replays persisted progress."
         actions={
           <>
             <Link
@@ -66,12 +66,16 @@ export default async function InvestigationPage({
         }
       />
       <MockBanner>
-        Agent states below are mock snapshots (queued, running, completed, failed,
-        waiting for approval). They are not animated independently of a backend workflow.
+        Findings and evidence on this page still use the Phase 2 snapshot when the
+        backend has no investigation with this ID. Live node status uses SSE when
+        the API is reachable.
       </MockBanner>
       <div className="grid gap-6 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <div className="grid gap-6">
-          <AgentStatusList agents={investigation.agents} />
+          <LiveAgentWorkflow
+            investigationId={investigation.id}
+            initialAgents={investigation.agents}
+          />
           <InvestigationTimeline entries={investigation.timeline} />
         </div>
         <div className="grid gap-6">

@@ -2,7 +2,7 @@
 
 FastAPI application for log processing, detection, and agent orchestration. The Next.js frontend is a separate package.
 
-Phase 3 implements the process shell: configuration, logging, CORS, routing, and `GET /health`. Phase 4 adds PostgreSQL via SQLAlchemy, typed event/incident schemas, Alembic migrations, and read APIs for events and incidents. Phase 5 adds JSON/CSV upload, demo scenario loaders, and deterministic R1/R2/R3 detection with incident correlation. Phase 6 runs a four-node LangGraph investigation (`POST /api/incidents/{id}/investigate`) and persists each node in `agent_runs`. Live SSE progress is Phase 7.
+Phase 3 implements the process shell: configuration, logging, CORS, routing, and `GET /health`. Phase 4 adds PostgreSQL via SQLAlchemy, typed event/incident schemas, Alembic migrations, and read APIs for events and incidents. Phase 5 adds JSON/CSV upload, demo scenario loaders, and deterministic R1/R2/R3 detection with incident correlation. Phase 6 runs a four-node LangGraph investigation (`POST /api/incidents/{id}/investigate`) and persists each node in `agent_runs`. Phase 7 streams live progress on `GET /api/investigations/{id}/stream` from persisted `agent_runs` (replay + follow).
 
 ## Setup
 
@@ -64,6 +64,7 @@ If host port 5432 is already taken (for example a Windows `postgresql-x64-18` se
 - Incidents: http://localhost:8000/api/incidents
 - Investigate: `POST /api/incidents/{id}/investigate`
 - Investigation: `GET /api/investigations/{id}`
+- Live progress (SSE): `GET /api/investigations/{id}/stream`
 - Docs: http://localhost:8000/docs (disabled when `APP_ENV=production`)
 
 ## Checks

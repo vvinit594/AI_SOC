@@ -15,6 +15,7 @@ npm run dev      # http://localhost:3000
 npm run build
 npm run start
 npm run lint
+npm test         # vitest (investigation SSE reducer)
 ```
 
 ## Environment
@@ -28,4 +29,4 @@ See `../docs/environment.md`. Only `NEXT_PUBLIC_*` variables belong here; they a
 
 ## Data
 
-Pages still read incidents and events from `src/lib/data.ts` → `src/lib/mock-data.ts`. The only live backend call from the UI is `getHealth()` from `src/lib/api.ts`. Mock records cover the three frozen demo scenarios (brute-force, suspicious outbound, benign) and share UUIDs with `backend/app/db/demo_data.py`.
+Pages still read incidents and events from `src/lib/data.ts` → `src/lib/mock-data.ts`. The investigation workspace also opens `GET /api/investigations/{id}` and `GET /api/investigations/{id}/stream` (SSE). If that investigation is not on the API, the page keeps the snapshot and shows that live progress is unavailable. Mock records cover the three frozen demo scenarios (brute-force, suspicious outbound, benign) and share UUIDs with `backend/app/db/demo_data.py`.

@@ -210,10 +210,9 @@ def test_invalid_llm_output_falls_back_to_deterministic(client: TestClient, monk
     monkeypatch.setattr(service, "build_llm_client", original)
 
 
-def test_sse_stream_is_not_implemented(client: TestClient) -> None:
+def test_sse_stream_unknown_investigation_is_404(client: TestClient) -> None:
     response = client.get(f"/api/investigations/{uuid.uuid4()}/stream")
-    assert response.status_code == 501
-    assert "Phase 7" in response.json()["detail"]
+    assert response.status_code == 404
 
 
 def test_stale_running_investigation_is_retried(client: TestClient) -> None:
