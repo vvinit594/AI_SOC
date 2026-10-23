@@ -2,7 +2,7 @@
 
 An Agentic AI Security Operations Center (SOC) that ingests security logs, detects suspicious activity with transparent rules, coordinates specialized LangGraph agents to investigate incidents, enriches indicators with real threat intelligence, maps behaviour to MITRE ATT&CK, and recommends a safe, human-approved response — all through a live security dashboard.
 
-> **Status:** MVP in active development. See [`docs/MVP_SPEC.md`](docs/MVP_SPEC.md) for the frozen v1 scope and acceptance criteria.
+> **Status:** Phase 5 (ingestion & detection) complete. Phase 6 (agentic AI workflow) has not started. See [`docs/MVP_SPEC.md`](docs/MVP_SPEC.md) for the frozen v1 scope.
 
 ---
 
@@ -111,7 +111,7 @@ Open [http://localhost:3000](http://localhost:3000). Incident tables still use m
 npm run build    # production build check
 ```
 
-**Backend (Phase 3–4)**
+**Backend (Phase 3–5)**
 
 ```bash
 cd backend
@@ -144,7 +144,7 @@ Pytest uses an in-memory SQLite database and does not require Docker:
 .venv\Scripts\ruff.exe check app
 ```
 
-The frontend still reads Phase 2 mock data. `GET /api/events` and `GET /api/incidents` persist and return the same demo IDs so Phase 5 can swap the UI without changing scenarios.
+The frontend still reads Phase 2 mock data. Backend `GET /api/events` and `GET /api/incidents` persist the same demo IDs; the UI swap is a later wiring step, not Phase 6.
 
 The final target is a single command:
 
@@ -161,7 +161,7 @@ docker compose up --build
 | 2 | Next.js frontend foundation | ✅ Done |
 | 3 | FastAPI backend | ✅ Done |
 | 4 | Database & event schemas | ✅ Done |
-| 5 | Log ingestion & threat detection | ⏳ |
+| 5 | Log ingestion & threat detection | ✅ Done |
 | 6 | Agentic AI workflow (LangGraph) | ⏳ |
 | 7 | Live investigation progress (SSE) | ⏳ |
 | 8 | Response center & incident reports | ⏳ |

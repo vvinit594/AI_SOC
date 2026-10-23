@@ -1,6 +1,6 @@
 # AI-SOC — MVP Specification (v1)
 
-**Status:** Phase 0 — scope frozen pending review  
+**Status:** Phase 5 (ingestion & detection) complete; Phase 6 not started. Scope remains frozen.
 **Product:** AI-SOC — Autonomous Threat Investigation & Response Platform  
 **One-line definition:** A deployable Agentic AI platform that ingests security events, detects suspicious activity with transparent rules, coordinates specialized LangGraph agents to investigate, enriches indicators with real threat intelligence, explains the probable attack with evidence, and recommends a safe, human-approved response through a live SOC dashboard.
 

@@ -365,6 +365,9 @@ def test_concurrent_detect_creates_one_incident(tmp_path: Path) -> None:
     settings = build_settings(database_url=f"sqlite:///{db_path.resolve().as_posix()}")
     application = create_app(settings)
     Base.metadata.create_all(application.state.engine)
+    with application.state.engine.begin() as connection:
+        connection.exec_driver_sql("PRAGMA journal_mode=WAL")
+        connection.exec_driver_sql("PRAGMA busy_timeout=5000")
     with TestClient(application) as client:
         _upload_events(client, [_failure(minute) for minute in range(5)])
 

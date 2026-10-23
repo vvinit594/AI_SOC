@@ -2,7 +2,7 @@
 
 FastAPI application for log processing, detection, and agent orchestration. The Next.js frontend is a separate package.
 
-Phase 3 implements the process shell: configuration, logging, CORS, routing, and `GET /health`. Phase 4 adds PostgreSQL via SQLAlchemy, typed event/incident schemas, Alembic migrations, and read APIs for events and incidents. Log ingestion, detection, and agents are not implemented yet.
+Phase 3 implements the process shell: configuration, logging, CORS, routing, and `GET /health`. Phase 4 adds PostgreSQL via SQLAlchemy, typed event/incident schemas, Alembic migrations, and read APIs for events and incidents. Phase 5 adds JSON/CSV upload, demo scenario loaders, and deterministic R1/R2/R3 detection with incident correlation. Agentic investigation is Phase 6.
 
 ## Setup
 
