@@ -51,9 +51,7 @@ def test_get_incident_invalid_uuid_returns_validation_error(client: TestClient) 
     assert response.json()["error"] == "validation_error"
 
 
-def test_list_incidents_filters_by_severity(
-    client: TestClient, seed_db: dict[str, int]
-) -> None:
+def test_list_incidents_filters_by_severity(client: TestClient, seed_db: dict[str, int]) -> None:
     response = client.get("/api/incidents", params={"severity": "low"})
     assert response.status_code == 200
     body = response.json()

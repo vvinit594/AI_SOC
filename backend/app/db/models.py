@@ -32,9 +32,7 @@ class SecurityEvent(Base):
     source: Mapped[str] = mapped_column(String(64), nullable=False)
     raw_message: Mapped[str] = mapped_column(Text, nullable=False)
     scenario: Mapped[str | None] = mapped_column(String(8))
-    created_at: Mapped[datetime] = mapped_column(
-        UTCDateTime, nullable=False, default=utc_now
-    )
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utc_now)
 
     incident_links: Mapped[list["IncidentEvent"]] = relationship(back_populates="event")
 
@@ -53,9 +51,7 @@ class Incident(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     scenario: Mapped[str | None] = mapped_column(String(8))
-    created_at: Mapped[datetime] = mapped_column(
-        UTCDateTime, nullable=False, default=utc_now
-    )
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utc_now)
 
     event_links: Mapped[list["IncidentEvent"]] = relationship(
         back_populates="incident", cascade="all, delete-orphan"
@@ -104,9 +100,7 @@ class AgentRun(Base):
     )
     agent_name: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
-    structured_output: Mapped[dict[str, Any]] = mapped_column(
-        JSON, nullable=False, default=dict
-    )
+    structured_output: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     started_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     completed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     error: Mapped[str | None] = mapped_column(Text)
@@ -129,15 +123,11 @@ class ResponseAction(Base):
     target: Mapped[str | None] = mapped_column(String(255))
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     risk_level: Mapped[str] = mapped_column(String(16), nullable=False)
-    approval_status: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="proposed"
-    )
+    approval_status: Mapped[str] = mapped_column(String(32), nullable=False, default="proposed")
     execution_status: Mapped[str] = mapped_column(
         String(32), nullable=False, default="not_executed"
     )
     simulated: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        UTCDateTime, nullable=False, default=utc_now
-    )
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utc_now)
 
     incident: Mapped[Incident] = relationship(back_populates="response_actions")

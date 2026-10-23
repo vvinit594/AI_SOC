@@ -4,6 +4,14 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+try:
+    import sqlalchemy  # noqa: F401
+except ModuleNotFoundError as exc:
+    raise RuntimeError(
+        "SQLAlchemy is not installed in this interpreter. "
+        "From backend/, use .venv\\Scripts\\python.exe -m pytest"
+    ) from exc
+
 from app.core.config import Settings
 from app.db import models as _db_models  # noqa: F401
 from app.db.base import Base

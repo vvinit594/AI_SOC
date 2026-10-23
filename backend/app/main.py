@@ -1,4 +1,5 @@
 import logging
+import sys
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from typing import Any
@@ -8,12 +9,13 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import __version__
 from app.api.router import api_router
 from app.api.routes.health import router as health_router
-from app.core.config import Settings, get_settings
+from app.core.config import Settings, get_settings, redact_database_url
 from app.core.logging import configure_logging
 from app.db import models as _db_models  # noqa: F401
 from app.db.session import create_engine_from_settings, create_session_factory
@@ -30,6 +32,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
+        logger.info("Python executable: %s (%s)", sys.executable, sys.version.split()[0])
+        logger.info("Database target: %s", redact_database_url(resolved.database_url))
+        try:
+            with engine.connect() as connection:
+                connection.execute(text("SELECT 1"))
+            logger.info("Database connection ok")
+        except Exception:
+            logger.exception("Database connection failed")
         yield
         engine.dispose()
 
@@ -88,10 +98,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return JSONResponse(status_code=422, content=content)
 
     @application.exception_handler(Exception)
-    async def unhandled_exception_handler(
-        _request: Request, exc: Exception
-    ) -> JSONResponse:
-        logger.exception("Unhandled application error", exc_info=exc)
+    async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        logger.exception(
+            "Unhandled application error method=%s path=%s",
+            request.method,
+            request.url.path,
+            exc_info=exc,
+        )
         payload = ErrorResponse(
             error="internal_error",
             detail="An unexpected error occurred",

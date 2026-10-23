@@ -99,8 +99,7 @@ def demo_events() -> list[dict[str, object]]:
                 "action": "connection_opened",
                 "source": "firewall",
                 "raw_message": (
-                    "Outbound TCP 192.0.2.50:44300 -> 198.51.100.88:443 "
-                    f"(repeat {index + 1}/10)"
+                    f"Outbound TCP 192.0.2.50:44300 -> 198.51.100.88:443 (repeat {index + 1}/10)"
                 ),
                 "scenario": "B",
             }

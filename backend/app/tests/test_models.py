@@ -86,9 +86,7 @@ def test_event_incident_and_action_round_trip(client: TestClient) -> None:
         session.commit()
 
         stored_event = session.get(SecurityEvent, event_id)
-        stored_incident = session.scalar(
-            select(Incident).where(Incident.id == incident_id)
-        )
+        stored_incident = session.scalar(select(Incident).where(Incident.id == incident_id))
         assert stored_event is not None
         assert stored_event.timestamp.tzinfo is not None
         assert stored_event.timestamp.astimezone(UTC) == timestamp

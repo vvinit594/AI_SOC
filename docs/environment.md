@@ -86,6 +86,8 @@ This document lists every environment variable the AI-SOC application reads, whe
 
 Compose publishes Postgres on host port `5432`. If that port is already bound (common on Windows when `postgresql-x64-18` is installed), the API will fail with password authentication errors because it is talking to the wrong server. Leave the committed Compose service unchanged and use a gitignored override port plus a matching local `DATABASE_URL`.
 
+On a host where both Windows PostgreSQL and Docker publish `5432`, `localhost:5432` on IPv4 typically reaches the Windows service. Point `DATABASE_URL` at the Compose override port (for example `55432`) and run Alembic from `backend/` so it loads `backend/.env`.
+
 | Variable | Default | Secret | Description |
 |----------|---------|--------|-------------|
 | `POSTGRES_USER` | `aisoc` | **yes** | Database user created by the Postgres container. |

@@ -99,12 +99,8 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["incident_id"], ["incidents.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(
-        "ix_response_actions_incident_id", "response_actions", ["incident_id"]
-    )
-    op.create_index(
-        "ix_response_actions_approval_status", "response_actions", ["approval_status"]
-    )
+    op.create_index("ix_response_actions_incident_id", "response_actions", ["incident_id"])
+    op.create_index("ix_response_actions_approval_status", "response_actions", ["approval_status"])
 
 
 def downgrade() -> None:

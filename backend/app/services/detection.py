@@ -292,8 +292,7 @@ def _auth_plans(
                 )
             )
             summary = (
-                f"R1: {r1_reason}. R2: {r2_reason}. "
-                "ATT&CK T1110 Brute Force, T1078 Valid Accounts."
+                f"R1: {r1_reason}. R2: {r2_reason}. ATT&CK T1110 Brute Force, T1078 Valid Accounts."
             )
             title = f"Brute-force login followed by success on {user_label}"
         scenario = _shared_scenario(cluster + follow_on)

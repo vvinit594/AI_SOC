@@ -66,10 +66,18 @@ If host port 5432 is already taken (for example a Windows `postgresql-x64-18` se
 
 ## Checks
 
-```bash
-.venv\Scripts\python.exe -m pytest
-.venv\Scripts\ruff.exe check app
+Run every command from this `backend/` directory with **this** `.venv`, not a global `python` and not a venv at the repo root. On this Windows machine the unprefixed `python` command is 3.14 and does not include SQLAlchemy.
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+.\.venv\Scripts\python.exe -m pytest
+.\.venv\Scripts\python.exe -m ruff check .
+.\.venv\Scripts\python.exe -m ruff format --check .
+.\.venv\Scripts\alembic.exe current
+.\.venv\Scripts\alembic.exe check
 ```
+
+Alembic reads `backend/alembic.ini`. Running `alembic` from the repository root fails with `No 'script_location' key found`.
 
 ## Environment
 

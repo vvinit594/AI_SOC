@@ -1,10 +1,14 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
+from urllib.parse import urlparse
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 AppEnv = Literal["development", "test", "production"]
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+BACKEND_ENV_FILE = BACKEND_ROOT / ".env"
 
 
 def parse_cors_origins(value: str) -> list[str]:
@@ -20,7 +24,7 @@ class Settings(BaseSettings):
     """Runtime settings loaded from environment variables and optional `.env`."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=BACKEND_ENV_FILE,
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
@@ -82,6 +86,16 @@ class Settings(BaseSettings):
     @property
     def docs_enabled(self) -> bool:
         return self.app_env != "production"
+
+
+def redact_database_url(url: str) -> str:
+    parsed = urlparse(url)
+    host = parsed.hostname or "localhost"
+    port = f":{parsed.port}" if parsed.port else ""
+    user = parsed.username or ""
+    database = parsed.path or ""
+    auth = f"{user}:***" if user else "***"
+    return f"{parsed.scheme}://{auth}@{host}{port}{database}"
 
 
 @lru_cache

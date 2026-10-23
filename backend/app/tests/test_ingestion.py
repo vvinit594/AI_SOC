@@ -1,6 +1,9 @@
 import json
+import logging
 import uuid
 
+import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.db.base import Base
@@ -14,6 +17,7 @@ def _client_with_settings(**overrides: object) -> TestClient:
     application = create_app(settings)
     Base.metadata.create_all(application.state.engine)
     return TestClient(application)
+
 
 VALID_EVENT = {
     "timestamp": "2026-10-21T12:00:00Z",
@@ -185,6 +189,35 @@ def test_load_scenario_is_idempotent(client: TestClient) -> None:
     assert client.get("/api/events", params={"scenario": "C"}).json()["total"] == 5
 
 
+def test_load_scenario_persist_failure_returns_safe_500(
+    application: FastAPI, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from app.services import ingestion as ingestion_service
+
+    def boom(*_args: object, **_kwargs: object) -> list[uuid.UUID]:
+        raise SQLAlchemyError('password authentication failed for user "aisoc"')
+
+    monkeypatch.setattr(ingestion_service.event_service, "upsert_events", boom)
+    with (
+        caplog.at_level(logging.ERROR),
+        TestClient(application, raise_server_exceptions=False) as test_client,
+    ):
+        response = test_client.post("/api/scenarios/A/load")
+        listed = test_client.get("/api/events").json()
+    assert response.status_code == 500
+    body = response.json()
+    assert body["error"] == "internal_error"
+    assert body["detail"] == "An unexpected error occurred"
+    assert "password" not in body["detail"].lower()
+    assert "aisoc" not in json.dumps(body).lower()
+    assert listed["total"] == 0
+    assert any(
+        "Failed to persist demo scenario A" in record.getMessage() for record in caplog.records
+    )
+
+
 def test_unknown_scenario_is_rejected(client: TestClient) -> None:
     response = client.post("/api/scenarios/Z/load")
     assert response.status_code == 422
@@ -241,5 +274,3 @@ def test_persist_failure_returns_error_without_partial_commit(
     response = _upload(client, "events.json", json.dumps([VALID_EVENT]), "application/json")
     assert response.status_code == 500
     assert client.get("/api/events").json()["total"] == 0
-
-

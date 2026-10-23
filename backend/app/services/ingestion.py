@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import logging
 from typing import Any, Literal
 
 from pydantic import ValidationError
@@ -19,6 +20,7 @@ from app.schemas.ingestion import LogUploadResponse, RecordError, ScenarioLoadRe
 from app.services import events as event_service
 from app.services.events import event_signature
 
+logger = logging.getLogger(__name__)
 _FIELD_ALIASES = {
     "eventType": "event_type",
     "sourceIp": "source_ip",
@@ -85,9 +87,7 @@ def ingest_records(
     if not records:
         raise IngestFileError("No events found in upload")
     if len(records) > settings.max_events_per_upload:
-        raise IngestFileError(
-            f"Upload contains more than {settings.max_events_per_upload} events"
-        )
+        raise IngestFileError(f"Upload contains more than {settings.max_events_per_upload} events")
 
     valid: list[tuple[int, dict[str, object]]] = []
     errors: list[RecordError] = []
@@ -123,9 +123,7 @@ def ingest_records(
         valid.append((index, payload))
 
     if conflicted_ids:
-        valid = [
-            item for item in valid if item[1].get("id") not in conflicted_ids
-        ]
+        valid = [item for item in valid if item[1].get("id") not in conflicted_ids]
 
     existing_conflicts = _conflicting_existing_ids(session, [item[1] for item in valid])
     if existing_conflicts:
@@ -158,9 +156,7 @@ def ingest_records(
     )
 
 
-def _conflicting_existing_ids(
-    session: Session, payloads: list[dict[str, object]]
-) -> set[object]:
+def _conflicting_existing_ids(session: Session, payloads: list[dict[str, object]]) -> set[object]:
     wanted = [payload["id"] for payload in payloads if payload.get("id") is not None]
     if not wanted:
         return set()
@@ -179,10 +175,12 @@ def _conflicting_existing_ids(
 
 def load_scenario(session: Session, scenario: DemoScenario) -> ScenarioLoadResponse:
     records = [event for event in demo_events() if event["scenario"] == scenario]
-    event_ids = event_service.upsert_events(session, records)
-    return ScenarioLoadResponse(
-        scenario=scenario, accepted=len(event_ids), event_ids=event_ids
-    )
+    try:
+        event_ids = event_service.upsert_events(session, records)
+    except SQLAlchemyError:
+        logger.exception("Failed to persist demo scenario %s", scenario)
+        raise
+    return ScenarioLoadResponse(scenario=scenario, accepted=len(event_ids), event_ids=event_ids)
 
 
 def _parse_json(text: str) -> list[dict[str, Any]]:

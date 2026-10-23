@@ -1,3 +1,6 @@
+import logging
+
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
@@ -23,14 +26,17 @@ def test_validation_error_returns_json_envelope() -> None:
     assert body["errors"]
 
 
-def test_unhandled_exception_returns_json_envelope() -> None:
+def test_unhandled_exception_returns_json_envelope(caplog: pytest.LogCaptureFixture) -> None:
     application = create_app(build_settings())
 
     @application.get("/__test/boom")
     def boom() -> None:
         raise RuntimeError("boom")
 
-    with TestClient(application, raise_server_exceptions=False) as test_client:
+    with (
+        caplog.at_level(logging.ERROR, logger="app.main"),
+        TestClient(application, raise_server_exceptions=False) as test_client,
+    ):
         response = test_client.get("/__test/boom")
 
     assert response.status_code == 500
@@ -39,3 +45,5 @@ def test_unhandled_exception_returns_json_envelope() -> None:
     assert body["code"] == "internal_error"
     assert body["detail"] == "An unexpected error occurred"
     assert "boom" not in body["detail"]
+    assert any("path=/__test/boom" in record.getMessage() for record in caplog.records)
+    assert any(record.exc_info for record in caplog.records)

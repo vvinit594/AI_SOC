@@ -51,18 +51,20 @@ class JsonLogFormatter(logging.Formatter):
 
 def configure_logging(settings: Settings) -> None:
     level = getattr(logging, settings.log_level, logging.INFO)
+    root = logging.getLogger()
+    root.setLevel(level)
+
+    for handler in list(root.handlers):
+        if getattr(handler, "_aisoc_configured", False):
+            root.removeHandler(handler)
+
     handler = logging.StreamHandler()
+    handler._aisoc_configured = True  # type: ignore[attr-defined]
     if settings.app_env == "production":
         handler.setFormatter(JsonLogFormatter())
     else:
-        handler.setFormatter(
-            logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s")
-        )
-
-    root = logging.getLogger()
-    root.handlers.clear()
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s"))
     root.addHandler(handler)
-    root.setLevel(level)
 
     logging.getLogger("uvicorn.access").setLevel(logging.INFO)
     logging.getLogger("uvicorn.error").setLevel(level)
