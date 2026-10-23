@@ -191,3 +191,22 @@ def test_postgres_phase5_scenarios_a_b_c(postgres_client: TestClient) -> None:
     closed = client.get(f"/api/incidents/{brute_id}").json()
     assert closed["status"] == "resolved"
     assert closed["summary"] == "Analyst closed after postgres verification"
+
+
+def test_postgres_phase6_investigation_persists_agent_runs(postgres_client: TestClient) -> None:
+    client = postgres_client
+    assert client.post("/api/scenarios/B/load").status_code == 200
+    detect = client.post("/api/incidents/detect").json()
+    listed = client.get("/api/incidents").json()["items"]
+    outbound = next(item for item in listed if item.get("scenario") == "B")
+    response = client.post(f"/api/incidents/{outbound['id']}/investigate")
+    assert response.status_code == 200, response.text
+    body = response.json()["investigation"]
+    assert len(body["nodes"]) == 4
+    assert all(node["status"] == "completed" for node in body["nodes"])
+    analysis = next(node for node in body["nodes"] if node["agent_name"] == "analysis")
+    assert "T1071" in analysis["structured_output"]["techniques"]
+    fetched = client.get(f"/api/investigations/{body['id']}")
+    assert fetched.status_code == 200
+    assert fetched.json()["incident_id"] == outbound["id"]
+    assert detect["created"] in {0, 1}

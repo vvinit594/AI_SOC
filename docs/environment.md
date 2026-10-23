@@ -36,9 +36,9 @@ This document lists every environment variable the AI-SOC application reads, whe
 
 | Variable | Required | Default | Secret | Description |
 |----------|----------|---------|--------|-------------|
-| `LLM_PROVIDER` | yes | `openai` | no | Which LangChain integration to load (e.g. `openai`, `anthropic`, `google`, `groq`). |
-| `LLM_API_KEY` | yes | — | **yes** | API key for the selected provider. |
-| `LLM_MODEL` | yes | — | no | Model name. Must support tool calling and structured output. |
+| `LLM_PROVIDER` | no | `none` | no | `none` \| `openai`. With `none`, analysis uses evidence-backed deterministic rules and records `llm_status=unavailable`. |
+| `LLM_API_KEY` | when provider is `openai` | — | **yes** | API key for the selected provider. |
+| `LLM_MODEL` | no | `gpt-4o-mini` | no | Model name. Must support JSON structured output. |
 | `LLM_TIMEOUT_SECONDS` | no | `60` | no | Per-call timeout. Timeouts are recorded on the agent run and are retryable. |
 | `LLM_MAX_RETRIES` | no | `2` | no | Retries for transient provider errors. |
 
@@ -46,7 +46,7 @@ This document lists every environment variable the AI-SOC application reads, whe
 
 | Variable | Required | Default | Secret | Description |
 |----------|----------|---------|--------|-------------|
-| `THREAT_INTEL_PROVIDER` | no | `abuseipdb` | no | `abuseipdb` \| `virustotal` \| `none`. With `none`, lookups return `unavailable` and the workflow still completes. |
+| `THREAT_INTEL_PROVIDER` | no | `none` | no | `abuseipdb` \| `none`. With `none`, lookups return `unavailable` and the workflow still completes. |
 | `THREAT_INTEL_API_KEY` | no* | — | **yes** | API key for the selected provider. *Required unless provider is `none`. |
 | `THREAT_INTEL_TIMEOUT_SECONDS` | no | `10` | no | Lookup timeout. Failures are reported as `unavailable`, never fabricated. |
 | `THREAT_INTEL_CACHE_TTL_SECONDS` | no | `86400` | no | How long an indicator's enrichment result is cached (24 h). |

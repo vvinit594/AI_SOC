@@ -1,6 +1,6 @@
 # AI-SOC — MVP Specification (v1)
 
-**Status:** Phase 5 (ingestion & detection) complete; Phase 6 not started. Scope remains frozen.
+**Status:** Phase 6 (agentic investigation workflow) complete; Phase 7 not started. Scope remains frozen.
 **Product:** AI-SOC — Autonomous Threat Investigation & Response Platform  
 **One-line definition:** A deployable Agentic AI platform that ingests security events, detects suspicious activity with transparent rules, coordinates specialized LangGraph agents to investigate, enriches indicators with real threat intelligence, explains the probable attack with evidence, and recommends a safe, human-approved response through a live SOC dashboard.
 
@@ -55,7 +55,7 @@ Unrestricted automatic blocking or account disabling · live enterprise endpoint
 | Detection | Python rules first; scikit-learn Isolation Forest **optional**, only if time permits |
 | Threat intel | **AbuseIPDB** (primary, IP reputation) or VirusTotal — provider-agnostic interface, selected by env var; results cached per indicator |
 | MITRE ATT&CK | Local curated subset of technique data (no live dependency during demo) |
-| LLM | Provider-agnostic via `LLM_API_KEY` / `LLM_MODEL`; must support tool calling + structured output |
+| LLM | `LLM_PROVIDER=none` (default, deterministic evidence-backed analysis) or `openai` via `LLM_API_KEY` / `LLM_MODEL`. Invalid model output falls back; results are never invented. |
 | Architecture | Frontend and backend are **separate apps**; all secrets live on the backend |
 | Deployment | Docker Compose locally · Vercel (Next.js) · Python-capable host (FastAPI) · managed PostgreSQL |
 | Repo | Monorepo `ai-soc/` with `frontend/`, `backend/`, `docs/`; `.env` files never committed |
@@ -101,25 +101,25 @@ Incident summary & severity · event evidence (with IDs) · investigation timeli
 
 ---
 
-## 8. Acceptance criteria — Definition of Done (0/16)
+## 8. Acceptance criteria — Definition of Done (8/16; Phase 6 items checked)
 
 **Core functionality**
-- [ ] Loads built-in scenarios and accepts JSON/CSV uploads with size/type limits.
-- [ ] Parses valid events; malformed records are reported clearly without corrupting data.
-- [ ] Incidents are created only by real detection rules and preserve underlying evidence.
-- [ ] Each investigation step's actual status and structured output is visible.
+- [x] Loads built-in scenarios and accepts JSON/CSV uploads with size/type limits.
+- [x] Parses valid events; malformed records are reported clearly without corrupting data.
+- [x] Incidents are created only by real detection rules and preserve underlying evidence.
+- [x] Each investigation step's actual status and structured output is visible.
 
 **Agentic AI**
-- [ ] A multi-step LangGraph workflow runs with structured agent outputs.
-- [ ] At least one agent calls a real external tool (threat-intel lookup).
-- [ ] Every finding links to event IDs or other traceable evidence.
-- [ ] LLM / API failures are handled explicitly — no invented successful results.
+- [x] A multi-step LangGraph workflow runs with structured agent outputs.
+- [x] At least one agent calls a real external tool (threat-intel lookup).
+- [x] Every finding links to event IDs or other traceable evidence.
+- [x] LLM / API failures are handled explicitly — no invented successful results.
 
 **Response & reporting**
-- [ ] A reasoned response recommendation is produced.
+- [x] A reasoned response recommendation is produced.
 - [ ] Approve/reject is recorded with actor + timestamp; simulated vs real is unambiguous.
 - [ ] A downloadable report with findings and timeline is generated.
-- [ ] Incidents, agent runs, and audit history survive page refresh and restart.
+- [x] Incidents, agent runs, and audit history survive page refresh and restart.
 
 **Deployment & demo**
 - [ ] Full demo loop works from a clean browser on the public URL.
@@ -134,8 +134,8 @@ Phase 0 scope (this doc) → 1 environment → 2 Next.js shell → 3 FastAPI →
 One phase at a time; each phase is reviewed, tested, and committed by the project owner before the next begins.
 
 ## 10. Open decisions to confirm before Phase 1
-1. **LLM provider/model** for the agents (e.g. OpenAI, Anthropic, Google, Groq) — determines which LangChain integration package we install in Phase 6.
-2. **Threat-intel provider**: AbuseIPDB (free tier, IP-focused) vs VirusTotal (IPs/domains/hashes, stricter free quota).
+1. **LLM provider/model** — decided in Phase 6: `LLM_PROVIDER=none` by default; optional `openai` (`gpt-4o-mini`) with structured JSON. No extra LangChain provider package until another vendor is added.
+2. **Threat-intel provider** — decided in Phase 6: `THREAT_INTEL_PROVIDER=none` by default; optional `abuseipdb`. Failures and documentation IPs are `unavailable`, never fabricated as malicious.
 3. **Backend host** for FastAPI (needs long-running requests + SSE): Render, Railway, Fly.io, etc.
 4. **Authentication for approval endpoints**: simple shared analyst token / basic login for v1, or none until Phase 9.
 5. **Report format**: HTML (simplest, no extra deps) vs PDF.

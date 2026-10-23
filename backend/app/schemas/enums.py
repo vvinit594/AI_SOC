@@ -1,6 +1,7 @@
 from typing import Literal
 
 Severity = Literal["critical", "high", "medium", "low"]
+Confidence = Literal["low", "medium", "high"]
 IncidentStatus = Literal[
     "open",
     "investigating",

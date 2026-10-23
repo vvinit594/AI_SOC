@@ -52,6 +52,15 @@ class Settings(BaseSettings):
     rule_outbound_connection_threshold: int = Field(default=10, ge=1)
     rule_outbound_window_minutes: int = Field(default=5, ge=1)
     rule_seeded_suspicious_ips: str = Field(default="198.51.100.88")
+    llm_provider: Literal["none", "openai"] = "none"
+    llm_api_key: str | None = None
+    llm_model: str = "gpt-4o-mini"
+    llm_timeout_seconds: int = Field(default=60, ge=1)
+    llm_max_retries: int = Field(default=2, ge=0)
+    threat_intel_provider: Literal["none", "abuseipdb"] = "none"
+    threat_intel_api_key: str | None = None
+    threat_intel_timeout_seconds: int = Field(default=10, ge=1)
+    threat_intel_cache_ttl_seconds: int = Field(default=86400, ge=1)
 
     @property
     def seeded_suspicious_ips(self) -> set[str]:

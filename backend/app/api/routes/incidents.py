@@ -9,8 +9,10 @@ from app.db.session import get_db
 from app.schemas.detection import DetectResponse
 from app.schemas.enums import IncidentStatus, Severity
 from app.schemas.incidents import IncidentListResponse, IncidentRead
+from app.schemas.investigations import InvestigateResponse
 from app.services import incidents as incident_service
 from app.services.detection import detect_incidents
+from app.services.investigations import InvestigationError, start_investigation
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
 
@@ -45,6 +47,22 @@ def run_detection(
     settings: Settings = Depends(get_settings),
 ) -> DetectResponse:
     return detect_incidents(session, settings)
+
+
+@router.post(
+    "/{incident_id}/investigate",
+    response_model=InvestigateResponse,
+    summary="Run the LangGraph investigation workflow",
+)
+def investigate_incident(
+    incident_id: uuid.UUID,
+    session: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> InvestigateResponse:
+    try:
+        return start_investigation(session, settings, incident_id)
+    except InvestigationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 @router.get("/{incident_id}", response_model=IncidentRead, summary="Get incident details")

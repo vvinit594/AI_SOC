@@ -67,6 +67,7 @@ def test_event_incident_and_action_round_trip(client: TestClient) -> None:
         )
         session.add(
             AgentRun(
+                investigation_id=uuid.uuid4(),
                 incident_id=incident_id,
                 agent_name="investigation",
                 status="completed",

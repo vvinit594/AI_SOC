@@ -2,7 +2,7 @@
 
 FastAPI application for log processing, detection, and agent orchestration. The Next.js frontend is a separate package.
 
-Phase 3 implements the process shell: configuration, logging, CORS, routing, and `GET /health`. Phase 4 adds PostgreSQL via SQLAlchemy, typed event/incident schemas, Alembic migrations, and read APIs for events and incidents. Phase 5 adds JSON/CSV upload, demo scenario loaders, and deterministic R1/R2/R3 detection with incident correlation. Agentic investigation is Phase 6.
+Phase 3 implements the process shell: configuration, logging, CORS, routing, and `GET /health`. Phase 4 adds PostgreSQL via SQLAlchemy, typed event/incident schemas, Alembic migrations, and read APIs for events and incidents. Phase 5 adds JSON/CSV upload, demo scenario loaders, and deterministic R1/R2/R3 detection with incident correlation. Phase 6 runs a four-node LangGraph investigation (`POST /api/incidents/{id}/investigate`) and persists each node in `agent_runs`. Live SSE progress is Phase 7.
 
 ## Setup
 
@@ -62,6 +62,8 @@ If host port 5432 is already taken (for example a Windows `postgresql-x64-18` se
 - Health: http://localhost:8000/health
 - Events: http://localhost:8000/api/events
 - Incidents: http://localhost:8000/api/incidents
+- Investigate: `POST /api/incidents/{id}/investigate`
+- Investigation: `GET /api/investigations/{id}`
 - Docs: http://localhost:8000/docs (disabled when `APP_ENV=production`)
 
 ## Checks
@@ -81,7 +83,7 @@ Alembic reads `backend/alembic.ini`. Running `alembic` from the repository root 
 
 ## Environment
 
-See `../docs/environment.md`. Phase 3–4 read:
+See `../docs/environment.md`. Phase 3–6 read:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
@@ -94,3 +96,5 @@ See `../docs/environment.md`. Phase 3–4 read:
 | `DATABASE_URL` | `postgresql+psycopg://aisoc:aisoc@localhost:5432/aisoc` | SQLAlchemy URL |
 | `DB_POOL_SIZE` | `5` | Connection pool size |
 | `DB_MAX_OVERFLOW` | `5` | Extra connections beyond pool size |
+| `LLM_PROVIDER` | `none` | `none` \| `openai`. Missing keys do not invent findings. |
+| `THREAT_INTEL_PROVIDER` | `none` | `none` \| `abuseipdb`. Failures are `unavailable`. |

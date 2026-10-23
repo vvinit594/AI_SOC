@@ -90,11 +90,16 @@ class IncidentEvent(Base):
 class AgentRun(Base):
     __tablename__ = "agent_runs"
     __table_args__ = (
+        UniqueConstraint(
+            "investigation_id", "agent_name", name="uq_agent_runs_investigation_agent"
+        ),
         Index("ix_agent_runs_incident_id", "incident_id"),
+        Index("ix_agent_runs_investigation_id", "investigation_id"),
         Index("ix_agent_runs_status", "status"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    investigation_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
     incident_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("incidents.id", ondelete="CASCADE"), nullable=False
     )

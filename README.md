@@ -2,7 +2,7 @@
 
 An Agentic AI Security Operations Center (SOC) that ingests security logs, detects suspicious activity with transparent rules, coordinates specialized LangGraph agents to investigate incidents, enriches indicators with real threat intelligence, maps behaviour to MITRE ATT&CK, and recommends a safe, human-approved response — all through a live security dashboard.
 
-> **Status:** Phase 5 (ingestion & detection) complete. Phase 6 (agentic AI workflow) has not started. See [`docs/MVP_SPEC.md`](docs/MVP_SPEC.md) for the frozen v1 scope.
+> **Status:** Phase 6 (agentic investigation workflow) complete. Phase 7 (live SSE progress) has not started. See [`docs/MVP_SPEC.md`](docs/MVP_SPEC.md) for the frozen v1 scope.
 
 ---
 
@@ -10,7 +10,7 @@ An Agentic AI Security Operations Center (SOC) that ingests security logs, detec
 
 1. Load a built-in scenario or upload a JSON/CSV security log.
 2. The detection engine parses events and raises incidents with structured evidence.
-3. Click **Investigate Incident** — a LangGraph workflow runs four agent nodes with live progress.
+3. Click **Investigate Incident** — a LangGraph workflow runs four agent nodes and persists each step. Live SSE progress is Phase 7.
 4. Review evidence, severity, attack timeline, threat-intel results, ATT&CK mapping, and root-cause hypothesis.
 5. Approve or reject the recommended (simulated) response; every decision is audited.
 6. Download the incident report. Everything persists across refreshes and restarts.
@@ -21,7 +21,7 @@ An Agentic AI Security Operations Center (SOC) that ingests security logs, detec
 ┌──────────────────────┐      REST + SSE      ┌──────────────────────────┐
 │  Next.js frontend    │ ───────────────────▶ │  FastAPI backend         │
 │  App Router · TS     │                      │  Ingestion · Detection   │
-│  Tailwind · shadcn   │ ◀─────────────────── │  LangGraph agents · SSE  │
+│  Tailwind · shadcn   │ ◀─────────────────── │  LangGraph investigate   │
 └──────────────────────┘                      └────────────┬─────────────┘
                                                            │ SQLAlchemy / Alembic
                                                            ▼
@@ -162,7 +162,7 @@ docker compose up --build
 | 3 | FastAPI backend | ✅ Done |
 | 4 | Database & event schemas | ✅ Done |
 | 5 | Log ingestion & threat detection | ✅ Done |
-| 6 | Agentic AI workflow (LangGraph) | ⏳ |
+| 6 | Agentic AI workflow (LangGraph) | ✅ Done |
 | 7 | Live investigation progress (SSE) | ⏳ |
 | 8 | Response center & incident reports | ⏳ |
 | 9 | Testing & security hardening | ⏳ |
