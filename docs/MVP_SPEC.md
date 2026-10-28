@@ -1,6 +1,6 @@
 # AI-SOC — MVP Specification (v1)
 
-**Status:** Phase 8A (persisted response actions and approve/reject API) complete. Phase 8B audit-log history, 8C downloadable reports, and 8D frontend integration are not started. Scope remains frozen.
+**Status:** Phase 8B (persistent audit-log history) complete. Phase 8C downloadable reports and 8D frontend integration are not started. Scope remains frozen.
 **Product:** AI-SOC — Autonomous Threat Investigation & Response Platform  
 **One-line definition:** A deployable Agentic AI platform that ingests security events, detects suspicious activity with transparent rules, coordinates specialized LangGraph agents to investigate, enriches indicators with real threat intelligence, explains the probable attack with evidence, and recommends a safe, human-approved response through a live SOC dashboard.
 
@@ -30,7 +30,7 @@
 | 5 | Threat-intelligence lookup (real API, bounded tool) | Result stored with source, timestamp, status; API failure → `unavailable`, never fabricated |
 | 6 | Transparent severity + MITRE ATT&CK mapping | Every severity and technique has a listed reason tied to event IDs |
 | 7 | Root-cause analysis | Evidence-backed explanation that states what is uncertain |
-| 8 | Response recommendations + approval/rejection | Actions are **simulated only**, labelled as such; decisions recorded with actor + timestamp + audit event |
+| 8 | Response recommendations + approval/rejection | Actions are **simulated only**, labelled as such; decisions recorded with actor + timestamp + audit event. **Done for persistence/API; frontend wiring is Phase 8D.** |
 | 9 | Incident report (downloadable HTML or PDF) | Generated from persisted structured data; includes all sections in §6 |
 | 10 | SOC dashboard | All counters/charts read from PostgreSQL, never hardcoded |
 | 11 | Deployment with persistent storage | Public URL completes the full demo loop without the developer's machine running |
@@ -69,7 +69,9 @@ Unrestricted automatic blocking or account disabling · live enterprise endpoint
 ### Frozen API surface
 `GET /health` · `POST /api/logs/upload` · `POST /api/scenarios/{name}/load` · `GET /api/events` · `POST /api/incidents/detect` · `GET /api/incidents` · `GET /api/incidents/{id}` · `POST /api/incidents/{id}/investigate` · `GET /api/investigations/{id}` · `GET /api/investigations/{id}/stream` (SSE) · `POST /api/actions/{id}/approve` · `POST /api/actions/{id}/reject` · `GET /api/incidents/{id}/report`
 
-Phase 8A implements approve/reject only. `GET /api/incidents/{id}` returns persisted `response_actions`. Decisions are simulated (`simulated=true`, `execution_status=not_executed`); no containment is invoked. Repeating the same decision is idempotent; the opposite decision is HTTP 409. Incident status stays `awaiting_approval` when individual actions are decided so one decision cannot imply that every recommendation was decided. Audit-log history and `GET /api/incidents/{id}/report` are not implemented yet.
+Phase 8A implements approve/reject. `GET /api/incidents/{id}` returns persisted `response_actions`. Decisions are simulated (`simulated=true`, `execution_status=not_executed`); no containment is invoked. Repeating the same decision is idempotent; the opposite decision is HTTP 409. Incident status stays `awaiting_approval` when individual actions are decided so one decision cannot imply that every recommendation was decided.
+
+Phase 8B persists append-only `audit_logs` rows in the same transaction as a successful approve/reject. Idempotent repeats and 409/404 responses do not write a new success audit event. `GET /api/incidents/{id}/audit-logs` returns that history (newest first, bounded pagination) under the same `ANALYST_API_TOKEN` policy as approve/reject. Application services never update or delete audit rows. Direct database access can still alter records; this is not tamper-proof WORM storage. Retention is a future operational decision. `GET /api/incidents/{id}/report` is not implemented yet.
 
 ### Frontend pages
 `/` SOC Overview · `/events` Event Explorer · `/incidents` + `/incidents/[id]` Incident Detail · `/investigations/[id]` Investigation Workspace · `/response` Response Center · `/reports` Reports & History

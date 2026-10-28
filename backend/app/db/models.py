@@ -138,3 +138,32 @@ class ResponseAction(Base):
     actor: Mapped[str | None] = mapped_column(String(32))
 
     incident: Mapped[Incident] = relationship(back_populates="response_actions")
+
+
+class AuditLog(Base):
+    """Append-only application audit event. Do not update or delete via services."""
+
+    __tablename__ = "audit_logs"
+    __table_args__ = (
+        UniqueConstraint(
+            "resource_type",
+            "resource_id",
+            "event_type",
+            name="uq_audit_logs_resource_event",
+        ),
+        Index("ix_audit_logs_occurred_at", "occurred_at"),
+        Index("ix_audit_logs_incident_id", "incident_id"),
+        Index("ix_audit_logs_resource", "resource_type", "resource_id"),
+        Index("ix_audit_logs_event_type", "event_type"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    occurred_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utc_now)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    actor: Mapped[str] = mapped_column(String(32), nullable=False)
+    resource_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    resource_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    incident_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("incidents.id", ondelete="SET NULL")
+    )
+    details: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)

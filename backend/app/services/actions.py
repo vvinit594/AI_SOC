@@ -24,6 +24,8 @@ from app.core.config import Settings
 from app.core.time import utc_now
 from app.db.models import Incident, ResponseAction
 from app.schemas.actions import ActionDecisionResponse, ResponseActionRead
+from app.schemas.enums import AuditEventType
+from app.services.audit import record_event
 from app.services.incident_lock import lock_incident
 
 logger = logging.getLogger(__name__)
@@ -59,7 +61,7 @@ def decide_action(
     with lock_incident(session, action.incident_id):
         try:
             return _apply_decision(session, action_id, decision, actor)
-        except ActionError:
+        except Exception:
             session.rollback()
             raise
 
@@ -87,11 +89,29 @@ def _apply_decision(
             status_code=409,
         )
 
+    previous = action.approval_status
+    event_type: AuditEventType = (
+        "response_action.approved" if decision == "approved" else "response_action.rejected"
+    )
     action.approval_status = decision
     action.decided_at = utc_now()
     action.actor = actor
     action.simulated = True
     action.execution_status = "not_executed"
+    record_event(
+        session,
+        event_type=event_type,
+        actor=actor,
+        resource_type="response_action",
+        resource_id=action.id,
+        incident_id=action.incident_id,
+        details={
+            "decision": decision,
+            "previous_approval_status": previous,
+            "resulting_approval_status": decision,
+            "action_type": action.action_type,
+        },
+    )
     incident = session.get(Incident, action.incident_id)
     session.commit()
     logger.info(

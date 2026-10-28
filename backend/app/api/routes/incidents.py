@@ -1,17 +1,21 @@
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.core.auth import AnalystAuthError, resolve_actor
 from app.core.config import Settings, get_settings
 from app.db.models import Incident
 from app.db.session import get_db
 from app.schemas.actions import ResponseActionRead
+from app.schemas.audit import AuditLogListResponse, AuditLogRead
 from app.schemas.detection import DetectResponse
 from app.schemas.enums import IncidentStatus, Severity
 from app.schemas.incidents import IncidentListResponse, IncidentRead
 from app.schemas.investigations import InvestigateResponse
 from app.services import incidents as incident_service
+from app.services.audit import AuditError, list_incident_audit_logs
 from app.services.detection import detect_incidents
 from app.services.investigations import InvestigationError, start_investigation
 
@@ -83,6 +87,32 @@ def investigate_incident(
         return start_investigation(session, settings, incident_id)
     except InvestigationError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.get(
+    "/{incident_id}/audit-logs",
+    response_model=AuditLogListResponse,
+    summary="List persisted audit events for an incident",
+)
+def get_incident_audit_logs(
+    incident_id: uuid.UUID,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    session: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    authorization: Annotated[str | None, Header()] = None,
+) -> AuditLogListResponse:
+    try:
+        resolve_actor(settings, authorization)
+        items, total = list_incident_audit_logs(session, incident_id, limit=limit, offset=offset)
+    except AnalystAuthError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except AuditError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return AuditLogListResponse(
+        items=[AuditLogRead.model_validate(item) for item in items],
+        total=total,
+    )
 
 
 @router.get("/{incident_id}", response_model=IncidentRead, summary="Get incident details")

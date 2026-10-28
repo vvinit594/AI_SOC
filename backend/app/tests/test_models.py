@@ -16,6 +16,7 @@ def test_metadata_registers_v1_tables() -> None:
         "incident_events",
         "agent_runs",
         "response_actions",
+        "audit_logs",
     }
 
 
@@ -27,6 +28,7 @@ def test_sqlite_schema_matches_models(client: TestClient) -> None:
         "incident_events",
         "agent_runs",
         "response_actions",
+        "audit_logs",
     }
 
 

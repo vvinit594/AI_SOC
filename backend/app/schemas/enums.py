@@ -26,3 +26,5 @@ AgentRunStatus = Literal[
 ActionStatus = Literal["proposed", "approved", "rejected"]
 ExecutionStatus = Literal["not_executed", "simulated", "failed"]
 RiskLevel = Literal["low", "medium", "high"]
+AuditEventType = Literal["response_action.approved", "response_action.rejected"]
+AuditResourceType = Literal["response_action", "incident"]

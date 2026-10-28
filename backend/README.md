@@ -2,7 +2,7 @@
 
 FastAPI application for log processing, detection, and agent orchestration. The Next.js frontend is a separate package.
 
-Phase 3 implements the process shell: configuration, logging, CORS, routing, and `GET /health`. Phase 4 adds PostgreSQL via SQLAlchemy, typed event/incident schemas, Alembic migrations, and read APIs for events and incidents. Phase 5 adds JSON/CSV upload, demo scenario loaders, and deterministic R1/R2/R3 detection with incident correlation. Phase 6 runs a four-node LangGraph investigation (`POST /api/incidents/{id}/investigate`) and persists each node in `agent_runs`. Phase 7 streams live progress on `GET /api/investigations/{id}/stream` from persisted `agent_runs` (replay + follow). Phase 8A persists response-action decisions and exposes `POST /api/actions/{id}/approve` and `/reject` (simulated only). Audit-log history, downloadable reports, and frontend wiring are not in this phase.
+Phase 3 implements the process shell: configuration, logging, CORS, routing, and `GET /health`. Phase 4 adds PostgreSQL via SQLAlchemy, typed event/incident schemas, Alembic migrations, and read APIs for events and incidents. Phase 5 adds JSON/CSV upload, demo scenario loaders, and deterministic R1/R2/R3 detection with incident correlation. Phase 6 runs a four-node LangGraph investigation (`POST /api/incidents/{id}/investigate`) and persists each node in `agent_runs`. Phase 7 streams live progress on `GET /api/investigations/{id}/stream` from persisted `agent_runs` (replay + follow). Phase 8A persists response-action decisions and exposes `POST /api/actions/{id}/approve` and `/reject` (simulated only). Phase 8B records those decisions in append-only `audit_logs` and exposes `GET /api/incidents/{id}/audit-logs`. Downloadable reports and frontend wiring are not in this phase.
 
 ## Setup
 
@@ -67,6 +67,7 @@ If host port 5432 is already taken (for example a Windows `postgresql-x64-18` se
 - Live progress (SSE): `GET /api/investigations/{id}/stream`
 - Approve action: `POST /api/actions/{id}/approve` (simulated; see below)
 - Reject action: `POST /api/actions/{id}/reject` (simulated; see below)
+- Incident audit history: `GET /api/incidents/{id}/audit-logs`
 - Docs: http://localhost:8000/docs (disabled when `APP_ENV=production`)
 
 ### Approve / reject (Phase 8A)
@@ -87,6 +88,12 @@ Decisions set `decided_at` (UTC) and keep `simulated=true` and `execution_status
 
 Re-running an investigation does not delete or reset approved/rejected rows and does not recreate a proposed duplicate for the same `(action_type, target)`. Concurrent contradictory decisions are serialized with the existing incident advisory lock plus `SELECT … FOR UPDATE` on PostgreSQL.
 
+### Audit history (Phase 8B)
+
+A successful approve or reject inserts one `audit_logs` row in the **same transaction** as the action update. If the audit insert fails, the decision is rolled back. Repeating the same decision, 409 conflicts, and 404/422 errors do not write a success audit event.
+
+`GET /api/incidents/{id}/audit-logs` returns `{items, total}` newest-first (`occurred_at` descending) with the same pagination bounds as incident list (`limit` 1–500, default 100). It uses the same `ANALYST_API_TOKEN` policy as approve/reject. There is no endpoint to edit or delete audit rows. Application code is append-only; a DBA with SQL access can still change the table. Retention is not automated.
+
 ## Checks
 
 Run every command from this `backend/` directory with **this** `.venv`, not a global `python` and not a venv at the repo root. On this Windows machine the unprefixed `python` command is 3.14 and does not include SQLAlchemy.
@@ -104,7 +111,7 @@ Alembic reads `backend/alembic.ini`. Running `alembic` from the repository root 
 
 ## Environment
 
-See `../docs/environment.md`. Phase 3–8A read:
+See `../docs/environment.md`. Phase 3–8B read:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|

@@ -392,3 +392,17 @@ def test_postgres_concurrent_contradictory_decisions(postgres_client: TestClient
     assert detail["status"] == "awaiting_approval"
     assert len(detail["actions"]) == 1
     assert detail["actions"][0]["approval_status"] == stored.approval_status
+
+    from app.db.models import AuditLog
+
+    session = client.app.state.session_factory()
+    try:
+        audits = list(
+            session.scalars(select(AuditLog).where(AuditLog.resource_id == action_id)).all()
+        )
+        assert len(audits) == 1
+        expected = f"response_action.{stored.approval_status}"
+        assert audits[0].event_type == expected
+        assert audits[0].details["resulting_approval_status"] == stored.approval_status
+    finally:
+        session.close()

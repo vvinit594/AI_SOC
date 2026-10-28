@@ -67,7 +67,7 @@ This document lists every environment variable the AI-SOC application reads, whe
 
 | Variable | Required | Default | Secret | Description |
 |----------|----------|---------|--------|-------------|
-| `ANALYST_API_TOKEN` | production: yes | empty (`None`) | **yes** | Shared bearer token for `POST /api/actions/{id}/approve` and `/reject`. See behavior below. Not used for per-user identity. |
+| `ANALYST_API_TOKEN` | production: yes | empty (`None`) | **yes** | Shared bearer token for `POST /api/actions/{id}/approve`, `/reject`, and `GET /api/incidents/{id}/audit-logs`. See behavior below. Not used for per-user identity. |
 | `RATE_LIMIT_INVESTIGATE_PER_MINUTE` | no | `5` | no | Rate limit for `POST /api/incidents/{id}/investigate`. **Not implemented in Phase 8A.** |
 | `RATE_LIMIT_UPLOAD_PER_MINUTE` | no | `10` | no | Rate limit for `POST /api/logs/upload`. **Not implemented in Phase 8A.** |
 
@@ -84,7 +84,9 @@ The token is compared with `Authorization: Bearer <token>` using a length-hiding
 | `production` | yes | matching bearer | 200 | `analyst` |
 | `production` | yes | missing or wrong bearer | 401 | — |
 
-Limitations: this is a **shared** token. It identifies only the generic actor `analyst`, never a named person. It is not session login, RBAC, or per-analyst audit identity. Phase 8B audit-log history is separate and not implemented here.
+Limitations: this is a **shared** token. It identifies only the generic actor `analyst`, never a named person. It is not session login, RBAC, or per-analyst audit identity.
+
+Phase 8B audit rows are append-only in application code. A database administrator with SQL access can still update or delete `audit_logs`. There is no automated retention or purge.
 
 ---
 
