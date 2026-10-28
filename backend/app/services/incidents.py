@@ -41,7 +41,10 @@ def list_incidents(
 def get_incident(session: Session, incident_id: uuid.UUID) -> Incident | None:
     return session.scalar(
         select(Incident)
-        .options(selectinload(Incident.event_links))
+        .options(
+            selectinload(Incident.event_links),
+            selectinload(Incident.response_actions),
+        )
         .where(Incident.id == incident_id)
     )
 

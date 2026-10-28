@@ -4,6 +4,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.core.time import require_aware_utc
+from app.schemas.actions import ResponseActionRead
 from app.schemas.enums import DemoScenario, IncidentStatus, Severity
 
 
@@ -35,6 +36,7 @@ class IncidentRead(BaseModel):
     scenario: str | None
     created_at: datetime
     event_ids: list[uuid.UUID] = Field(default_factory=list)
+    actions: list[ResponseActionRead] = Field(default_factory=list)
 
 
 class IncidentListResponse(BaseModel):

@@ -134,5 +134,7 @@ class ResponseAction(Base):
     )
     simulated: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utc_now)
+    decided_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    actor: Mapped[str | None] = mapped_column(String(32))
 
     incident: Mapped[Incident] = relationship(back_populates="response_actions")

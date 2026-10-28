@@ -2,7 +2,7 @@
 
 FastAPI application for log processing, detection, and agent orchestration. The Next.js frontend is a separate package.
 
-Phase 3 implements the process shell: configuration, logging, CORS, routing, and `GET /health`. Phase 4 adds PostgreSQL via SQLAlchemy, typed event/incident schemas, Alembic migrations, and read APIs for events and incidents. Phase 5 adds JSON/CSV upload, demo scenario loaders, and deterministic R1/R2/R3 detection with incident correlation. Phase 6 runs a four-node LangGraph investigation (`POST /api/incidents/{id}/investigate`) and persists each node in `agent_runs`. Phase 7 streams live progress on `GET /api/investigations/{id}/stream` from persisted `agent_runs` (replay + follow).
+Phase 3 implements the process shell: configuration, logging, CORS, routing, and `GET /health`. Phase 4 adds PostgreSQL via SQLAlchemy, typed event/incident schemas, Alembic migrations, and read APIs for events and incidents. Phase 5 adds JSON/CSV upload, demo scenario loaders, and deterministic R1/R2/R3 detection with incident correlation. Phase 6 runs a four-node LangGraph investigation (`POST /api/incidents/{id}/investigate`) and persists each node in `agent_runs`. Phase 7 streams live progress on `GET /api/investigations/{id}/stream` from persisted `agent_runs` (replay + follow). Phase 8A persists response-action decisions and exposes `POST /api/actions/{id}/approve` and `/reject` (simulated only). Audit-log history, downloadable reports, and frontend wiring are not in this phase.
 
 ## Setup
 
@@ -65,7 +65,27 @@ If host port 5432 is already taken (for example a Windows `postgresql-x64-18` se
 - Investigate: `POST /api/incidents/{id}/investigate`
 - Investigation: `GET /api/investigations/{id}`
 - Live progress (SSE): `GET /api/investigations/{id}/stream`
+- Approve action: `POST /api/actions/{id}/approve` (simulated; see below)
+- Reject action: `POST /api/actions/{id}/reject` (simulated; see below)
 - Docs: http://localhost:8000/docs (disabled when `APP_ENV=production`)
+
+### Approve / reject (Phase 8A)
+
+`GET /api/incidents/{id}` includes persisted `response_actions` with database UUIDs (not mock IDs).
+
+| Current `approval_status` | Approve | Reject |
+|---------------------------|---------|--------|
+| `proposed` | 200, persist `approved` | 200, persist `rejected` |
+| same decision again | 200 idempotent (original `actor` and `decided_at`) | 200 idempotent |
+| opposite decision | 409 | 409 |
+| unknown UUID | 404 | 404 |
+| invalid UUID | 422 | 422 |
+
+Authentication uses `ANALYST_API_TOKEN` (`Authorization: Bearer …`). Development/test with an empty token records `unverified`. A valid configured token records `analyst`. Production with an empty token returns 403. See `../docs/environment.md`.
+
+Decisions set `decided_at` (UTC) and keep `simulated=true` and `execution_status=not_executed`. No containment function is invoked. Incident status stays `awaiting_approval` even when one of several actions is decided; action-level status is the source of truth. Incidents are never auto-resolved by an approval.
+
+Re-running an investigation does not delete or reset approved/rejected rows and does not recreate a proposed duplicate for the same `(action_type, target)`. Concurrent contradictory decisions are serialized with the existing incident advisory lock plus `SELECT … FOR UPDATE` on PostgreSQL.
 
 ## Checks
 
@@ -84,7 +104,7 @@ Alembic reads `backend/alembic.ini`. Running `alembic` from the repository root 
 
 ## Environment
 
-See `../docs/environment.md`. Phase 3–6 read:
+See `../docs/environment.md`. Phase 3–8A read:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
@@ -99,3 +119,4 @@ See `../docs/environment.md`. Phase 3–6 read:
 | `DB_MAX_OVERFLOW` | `5` | Extra connections beyond pool size |
 | `LLM_PROVIDER` | `none` | `none` \| `openai`. Missing keys do not invent findings. |
 | `THREAT_INTEL_PROVIDER` | `none` | `none` \| `abuseipdb`. Failures are `unavailable`. |
+| `ANALYST_API_TOKEN` | empty | Shared bearer for approve/reject. Empty is allowed in development/test (`unverified`) and refused in production (403). |

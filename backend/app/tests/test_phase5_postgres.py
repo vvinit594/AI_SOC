@@ -348,3 +348,47 @@ def test_postgres_sse_live_during_investigate(postgres_client: TestClient) -> No
     assert events[0]["event"] == "connected"
     assert events[-1]["event"] == "investigation_completed"
     assert sum(1 for item in events if item["event"] == "node_started") == 4
+
+
+def test_postgres_concurrent_contradictory_decisions(postgres_client: TestClient) -> None:
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app.services.actions import ActionError, decide_action
+    from app.tests.test_actions import _insert_proposed, _reload_action
+
+    client = postgres_client
+    incident_id, action_id = _insert_proposed(client)
+    factory = client.app.state.session_factory
+    settings = build_settings()
+    barrier = threading.Barrier(2)
+
+    def _worker(decision: str) -> object:
+        session = factory()
+        try:
+            barrier.wait(timeout=5)
+            return decide_action(session, settings, action_id, decision, None)
+        except ActionError as exc:
+            return exc
+        finally:
+            session.close()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(_worker, "approved")
+        second = pool.submit(_worker, "rejected")
+        results = [first.result(timeout=10), second.result(timeout=10)]
+
+    successes = [item for item in results if not isinstance(item, ActionError)]
+    conflicts = [
+        item for item in results if isinstance(item, ActionError) and item.status_code == 409
+    ]
+    assert len(successes) == 1, results
+    assert len(conflicts) == 1, results
+    stored = _reload_action(client, action_id)
+    assert stored.approval_status in {"approved", "rejected"}
+    assert stored.approval_status == successes[0].approval_status
+    assert stored.simulated is True
+    detail = client.get(f"/api/incidents/{incident_id}").json()
+    assert detail["status"] == "awaiting_approval"
+    assert len(detail["actions"]) == 1
+    assert detail["actions"][0]["approval_status"] == stored.approval_status

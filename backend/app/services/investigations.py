@@ -237,9 +237,20 @@ def _to_read(investigation_id: uuid.UUID, rows: list[AgentRun]) -> Investigation
     )
 
 
+_DECIDED_ACTIONS = frozenset({"approved", "rejected"})
+
+
 def _store_actions(
     session: Session, incident_id: uuid.UUID, actions: list[RecommendedAction]
 ) -> None:
+    existing = list(
+        session.scalars(
+            select(ResponseAction).where(ResponseAction.incident_id == incident_id)
+        ).all()
+    )
+    decided_keys = {
+        (row.action_type, row.target) for row in existing if row.approval_status in _DECIDED_ACTIONS
+    }
     session.execute(
         delete(ResponseAction).where(
             ResponseAction.incident_id == incident_id,
@@ -249,6 +260,8 @@ def _store_actions(
         )
     )
     for action in actions:
+        if (action.action_type, action.target) in decided_keys:
+            continue
         session.add(
             ResponseAction(
                 incident_id=incident_id,

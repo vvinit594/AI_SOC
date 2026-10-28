@@ -17,7 +17,7 @@ This document lists every environment variable the AI-SOC application reads, whe
 
 | Variable | Required | Default | Secret | Description |
 |----------|----------|---------|--------|-------------|
-| `APP_ENV` | no | `development` | no | `development` \| `test` \| `production`. Controls debug output and docs exposure. |
+| `APP_ENV` | no | `development` | no | `development` \| `test` \| `production`. Controls debug output, docs exposure, and approve/reject token policy. If unset, Pydantic resolves `development` — it is never silently treated as production. `test` follows the development approval policy. |
 | `APP_NAME` | no | `AI-SOC API` | no | Display name in FastAPI docs and health response. |
 | `LOG_LEVEL` | no | `INFO` | no | Python logging level. |
 | `API_HOST` | no | `0.0.0.0` | no | Bind host for uvicorn. |
@@ -63,13 +63,28 @@ This document lists every environment variable the AI-SOC application reads, whe
 | `RULE_OUTBOUND_WINDOW_MINUTES` | no | `5` | no | R3 time window. |
 | `RULE_SEEDED_SUSPICIOUS_IPS` | no | `198.51.100.88` | no | Comma-separated destinations that fire R3 on any connection (demo indicator). |
 
-### Security (Phase 8–9)
+### Security (Phase 8A token; Phase 9 rate limits)
 
 | Variable | Required | Default | Secret | Description |
 |----------|----------|---------|--------|-------------|
-| `ANALYST_API_TOKEN` | prod: yes | — | **yes** | Shared bearer token required on approval/rejection endpoints when the app is publicly reachable. |
-| `RATE_LIMIT_INVESTIGATE_PER_MINUTE` | no | `5` | no | Rate limit for `POST /api/incidents/{id}/investigate`. |
-| `RATE_LIMIT_UPLOAD_PER_MINUTE` | no | `10` | no | Rate limit for `POST /api/logs/upload`. |
+| `ANALYST_API_TOKEN` | production: yes | empty (`None`) | **yes** | Shared bearer token for `POST /api/actions/{id}/approve` and `/reject`. See behavior below. Not used for per-user identity. |
+| `RATE_LIMIT_INVESTIGATE_PER_MINUTE` | no | `5` | no | Rate limit for `POST /api/incidents/{id}/investigate`. **Not implemented in Phase 8A.** |
+| `RATE_LIMIT_UPLOAD_PER_MINUTE` | no | `10` | no | Rate limit for `POST /api/logs/upload`. **Not implemented in Phase 8A.** |
+
+#### `ANALYST_API_TOKEN` behavior (Phase 8A)
+
+The token is compared with `Authorization: Bearer <token>` using a length-hiding digest compare. Token values are never logged or returned. An `X-Analyst-Id` header is ignored and is not proof of identity.
+
+| `APP_ENV` | Token configured? | Request | Result | Recorded `actor` |
+|-----------|-------------------|---------|--------|------------------|
+| `development` or `test` | no / empty | no bearer required | 200 | `unverified` |
+| `development` or `test` | yes | matching bearer | 200 | `analyst` |
+| `development` or `test` | yes | missing or wrong bearer | 401 | — |
+| `production` | no / empty | any | 403 | — |
+| `production` | yes | matching bearer | 200 | `analyst` |
+| `production` | yes | missing or wrong bearer | 401 | — |
+
+Limitations: this is a **shared** token. It identifies only the generic actor `analyst`, never a named person. It is not session login, RBAC, or per-analyst audit identity. Phase 8B audit-log history is separate and not implemented here.
 
 ---
 

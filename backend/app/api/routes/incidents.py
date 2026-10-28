@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings, get_settings
 from app.db.models import Incident
 from app.db.session import get_db
+from app.schemas.actions import ResponseActionRead
 from app.schemas.detection import DetectResponse
 from app.schemas.enums import IncidentStatus, Severity
 from app.schemas.incidents import IncidentListResponse, IncidentRead
@@ -17,10 +18,29 @@ from app.services.investigations import InvestigationError, start_investigation
 router = APIRouter(prefix="/incidents", tags=["incidents"])
 
 
-def _to_read(incident: Incident) -> IncidentRead:
-    payload = IncidentRead.model_validate(incident)
-    event_ids = incident_service.incident_event_ids(incident)
-    return payload.model_copy(update={"event_ids": event_ids})
+def _to_read(incident: Incident, *, include_actions: bool = False) -> IncidentRead:
+    actions: list[ResponseActionRead] = []
+    if include_actions:
+        actions = [
+            ResponseActionRead.model_validate(row)
+            for row in sorted(
+                incident.response_actions,
+                key=lambda item: (item.created_at, item.id),
+            )
+        ]
+    return IncidentRead.model_validate(
+        {
+            "id": incident.id,
+            "title": incident.title,
+            "severity": incident.severity,
+            "status": incident.status,
+            "summary": incident.summary,
+            "scenario": incident.scenario,
+            "created_at": incident.created_at,
+            "event_ids": incident_service.incident_event_ids(incident),
+            "actions": actions,
+        }
+    )
 
 
 @router.get("", response_model=IncidentListResponse, summary="List incidents")
@@ -73,4 +93,4 @@ def get_incident(
     incident = incident_service.get_incident(session, incident_id)
     if incident is None:
         raise HTTPException(status_code=404, detail="Incident not found")
-    return _to_read(incident)
+    return _to_read(incident, include_actions=True)

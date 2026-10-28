@@ -61,6 +61,14 @@ class Settings(BaseSettings):
     threat_intel_api_key: str | None = None
     threat_intel_timeout_seconds: int = Field(default=10, ge=1)
     threat_intel_cache_ttl_seconds: int = Field(default=86400, ge=1)
+    analyst_api_token: str | None = Field(
+        default=None,
+        description=(
+            "Shared bearer token for approve/reject. Empty is allowed in development/test "
+            "(actor=unverified) and refused in production. A valid token identifies the "
+            "generic actor 'analyst', not a specific person."
+        ),
+    )
 
     @property
     def seeded_suspicious_ips(self) -> set[str]:
@@ -82,6 +90,15 @@ class Settings(BaseSettings):
     @classmethod
     def validate_cors_allowed_origins(cls, value: str) -> str:
         parse_cors_origins(value)
+        return value
+
+    @field_validator("analyst_api_token", mode="before")
+    @classmethod
+    def blank_analyst_token_is_none(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
         return value
 
     @property
