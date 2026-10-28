@@ -94,6 +94,29 @@ export function isAbortError(error: unknown): boolean {
   );
 }
 
+export const SAFE_DETAIL_MAX = 300;
+
+const SECRET_VALUE_RE =
+  /(password\s*=|secret\s*=|token\s*=|bearer\s+[A-Za-z0-9._~+/=-]+|authorization\s*:|postgresql(\+|:)\/\/|database_url)/i;
+
+export function sanitizeUpstreamDetail(
+  status: number,
+  detail: string,
+  fallback: string,
+): string {
+  if (status >= 500) {
+    return fallback;
+  }
+  const trimmed = detail.trim();
+  if (!trimmed || trimmed.length > SAFE_DETAIL_MAX) {
+    return fallback;
+  }
+  if (SECRET_VALUE_RE.test(trimmed)) {
+    return fallback;
+  }
+  return trimmed;
+}
+
 export function jsonError(
   status: number,
   detail: string,

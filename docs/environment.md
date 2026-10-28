@@ -132,7 +132,7 @@ On a host where both Windows PostgreSQL and Docker publish `5432`, `localhost:54
 | `POSTGRES_DB` | `aisoc` | no | Database name. **Never point pytest at this live database.** |
 | `POSTGRES_PORT` | `5432` | no | Host port mapped to the container. |
 
-PostgreSQL integration tests (`backend/app/tests/test_phase5_postgres.py`, `test_phase9_postgres.py`) create throwaway databases `aisoc_phase5_verify` and `aisoc_phase9_verify` on the local cluster, or use `AISOC_POSTGRES_TEST_URL` when set. If that URL's database name is `aisoc`, Phase 9 tests skip instead of writing to the live database.
+PostgreSQL integration tests (`backend/app/tests/test_phase5_postgres.py`, `test_phase9_postgres.py`) create throwaway databases `aisoc_phase5_verify` and `aisoc_phase9_verify` on a local cluster. Phase 9 validates `AISOC_POSTGRES_TEST_URL` before any create/drop: it must be PostgreSQL, a local host, and the dedicated name `aisoc_phase9_verify`. Live `aisoc`, `postgres`, remote hosts, and other database names are refused (tests skip). Cleanup warns if the throwaway database cannot be dropped. Credentials are never logged.
 
 ```powershell
 cd backend

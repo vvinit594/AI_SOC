@@ -8,6 +8,7 @@ import {
   isUuid,
   matchAnalystProxyPath,
   parseBoundedInt,
+  sanitizeUpstreamDetail,
   upstreamPath,
 } from "@/lib/analyst-proxy";
 
@@ -82,6 +83,23 @@ describe("analyst proxy allowlist", () => {
     expect(isAbortError(new DOMException("Aborted", "AbortError"))).toBe(true);
     expect(isAbortError(Object.assign(new Error("Aborted"), { name: "AbortError" }))).toBe(true);
     expect(isAbortError(new Error("failed"))).toBe(false);
+  });
+
+  it("preserves safe client errors and strips secret-bearing or 5xx details", () => {
+    const fallback = "Request failed with status 401";
+    expect(sanitizeUpstreamDetail(401, "Invalid or missing analyst token", fallback)).toBe(
+      "Invalid or missing analyst token",
+    );
+    expect(sanitizeUpstreamDetail(404, "Incident not found", "Request failed with status 404")).toBe(
+      "Incident not found",
+    );
+    expect(
+      sanitizeUpstreamDetail(409, "Action already approved", "Request failed with status 409"),
+    ).toBe("Action already approved");
+    expect(sanitizeUpstreamDetail(401, "token=short-secret", fallback)).toBe(fallback);
+    expect(
+      sanitizeUpstreamDetail(500, "database connection failed", "Request failed with status 500"),
+    ).toBe("Request failed with status 500");
   });
 });
 
@@ -176,8 +194,93 @@ describe("analyst proxy route", () => {
     );
     const response = await GET(request, context(["incidents", INCIDENT_ID, "audit-logs"]));
     const body = (await response.json()) as { detail: string };
+    expect(response.status).toBe(500);
+    expect(body.detail).toBe("Request failed with status 500");
     expect(body.detail).not.toContain(SECRET);
     expect(body.detail).not.toContain("super-secret-database");
+  });
+
+  it("sanitizes short secret-bearing 401 details without dropping a safe 401", async () => {
+    vi.stubEnv("API_UPSTREAM_URL", "http://upstream.test");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(401, { detail: "token=abc" })));
+    const secretResponse = await GET(
+      new Request(`http://localhost:3000/api/analyst/incidents/${INCIDENT_ID}/audit-logs`),
+      context(["incidents", INCIDENT_ID, "audit-logs"]),
+    );
+    expect(secretResponse.status).toBe(401);
+    expect(((await secretResponse.json()) as { detail: string }).detail).toBe(
+      "Request failed with status 401",
+    );
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse(401, { detail: "Invalid or missing analyst token" })),
+    );
+    const safeResponse = await GET(
+      new Request(`http://localhost:3000/api/analyst/incidents/${INCIDENT_ID}/audit-logs`),
+      context(["incidents", INCIDENT_ID, "audit-logs"]),
+    );
+    expect(safeResponse.status).toBe(401);
+    expect(((await safeResponse.json()) as { detail: string }).detail).toBe(
+      "Invalid or missing analyst token",
+    );
+  });
+
+  it("preserves 404 and 409 details used by the UI", async () => {
+    vi.stubEnv("API_UPSTREAM_URL", "http://upstream.test");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse(409, { detail: "Action already approved" })),
+    );
+    const conflict = await POST(
+      new Request(`http://localhost:3000/api/analyst/actions/${ACTION_ID}/reject`, {
+        method: "POST",
+      }),
+      context(["actions", ACTION_ID, "reject"]),
+    );
+    expect(conflict.status).toBe(409);
+    expect(((await conflict.json()) as { detail: string }).detail).toBe("Action already approved");
+  });
+
+  it("does not forward malformed JSON or unexpected content types", async () => {
+    vi.stubEnv("API_UPSTREAM_URL", "http://upstream.test");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response("{not-json token=leaked}", {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    const malformed = await GET(
+      new Request(`http://localhost:3000/api/analyst/incidents/${INCIDENT_ID}/audit-logs`),
+      context(["incidents", INCIDENT_ID, "audit-logs"]),
+    );
+    const malformedBody = (await malformed.json()) as { detail: string };
+    expect(malformed.status).toBe(502);
+    expect(malformedBody.detail).not.toContain("leaked");
+    expect(malformedBody.detail).not.toContain("token=");
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response("<html>not json</html>", {
+          status: 200,
+          headers: { "Content-Type": "text/html" },
+        }),
+      ),
+    );
+    const unexpected = await POST(
+      new Request(`http://localhost:3000/api/analyst/actions/${ACTION_ID}/approve`, {
+        method: "POST",
+      }),
+      context(["actions", ACTION_ID, "approve"]),
+    );
+    expect(unexpected.status).toBe(502);
+    expect(((await unexpected.json()) as { detail: string }).detail).toBe(
+      "Unexpected upstream content type",
+    );
   });
 
   it("forwards HTML reports with a sanitized filename", async () => {

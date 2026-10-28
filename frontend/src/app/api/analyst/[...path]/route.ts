@@ -6,11 +6,10 @@ import {
   jsonError,
   matchAnalystProxyPath,
   parseBoundedInt,
+  sanitizeUpstreamDetail,
   upstreamPath,
   type AnalystProxyTarget,
 } from "@/lib/analyst-proxy";
-
-const SAFE_DETAIL_MAX = 300;
 
 function upstreamOrigin(): string {
   const configured =
@@ -30,17 +29,6 @@ function logProxy(method: string, path: string, status: number): void {
   console.info(`analyst-proxy method=${method} path=${path} status=${status}`);
 }
 
-function safeDetail(text: string, fallback: string): string {
-  const trimmed = text.trim();
-  if (!trimmed || trimmed.length > SAFE_DETAIL_MAX) {
-    return fallback;
-  }
-  if (/token|password|secret|authorization|bearer|database/i.test(trimmed) && trimmed.length > 80) {
-    return fallback;
-  }
-  return trimmed;
-}
-
 function buildUpstreamUrl(target: AnalystProxyTarget, requestUrl: string): string {
   const origin = upstreamOrigin();
   const path = upstreamPath(target);
@@ -51,6 +39,35 @@ function buildUpstreamUrl(target: AnalystProxyTarget, requestUrl: string): strin
   const limit = parseBoundedInt(incoming.searchParams.get("limit"), 100, 1, 500);
   const offset = parseBoundedInt(incoming.searchParams.get("offset"), 0, 0, 1_000_000);
   return `${origin}${path}?limit=${limit}&offset=${offset}`;
+}
+
+function statusFallback(status: number): string {
+  return `Request failed with status ${status}`;
+}
+
+async function readUpstreamJson(
+  response: Response,
+): Promise<{ error?: string; detail?: string; code?: string } | null> {
+  try {
+    return (await response.json()) as { error?: string; detail?: string; code?: string };
+  } catch {
+    return null;
+  }
+}
+
+function forwardedJson(
+  status: number,
+  payload: { error?: string; detail?: string; code?: string },
+): Response {
+  const fallback = statusFallback(status);
+  return Response.json(
+    {
+      error: payload.error ?? "http_error",
+      detail: sanitizeUpstreamDetail(status, String(payload.detail ?? ""), fallback),
+      code: payload.code ?? "http_error",
+    },
+    { status },
+  );
 }
 
 async function proxy(
@@ -109,36 +126,24 @@ async function proxy(
 
     const contentType = response.headers.get("content-type") ?? "";
     if (contentType.includes("application/json")) {
-      const payload = (await response.json()) as {
-        error?: string;
-        detail?: string;
-        code?: string;
-      };
+      const payload = await readUpstreamJson(response);
       logProxy(request.method, upstreamPath(target), response.status);
-      return Response.json(
-        {
-          error: payload.error ?? "http_error",
-          detail: safeDetail(
-            String(payload.detail ?? ""),
-            `Request failed with status ${response.status}`,
-          ),
-          code: payload.code ?? "http_error",
-        },
-        { status: response.status },
-      );
+      if (payload === null) {
+        const status = response.status >= 500 || response.ok ? 502 : response.status;
+        return jsonError(status, statusFallback(response.status));
+      }
+      if (response.status >= 500) {
+        return jsonError(response.status, statusFallback(response.status));
+      }
+      return forwardedJson(response.status, payload);
     }
 
-    if (!response.ok) {
-      logProxy(request.method, upstreamPath(target), response.status);
-      return jsonError(response.status, `Request failed with status ${response.status}`);
-    }
-
-    const text = await response.text();
     logProxy(request.method, upstreamPath(target), response.status);
-    return new Response(text, {
-      status: response.status,
-      headers: { "Content-Type": contentType || "application/json" },
-    });
+    if (!response.ok) {
+      const status = response.status >= 500 ? 502 : response.status;
+      return jsonError(status, statusFallback(response.status));
+    }
+    return jsonError(502, "Unexpected upstream content type");
   } catch (error) {
     if (isAbortError(error)) {
       return jsonError(504, "Upstream request timed out");

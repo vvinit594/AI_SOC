@@ -8,7 +8,9 @@ Never writes to the live `aisoc` database.
 from __future__ import annotations
 
 import os
+import re
 import uuid
+import warnings
 from collections.abc import Generator
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse
@@ -28,7 +30,12 @@ from app.tests.test_investigations import _open_incident
 
 VERIFY_DB = "aisoc_phase9_verify"
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
-_LIVE_DB = "aisoc"
+_PROTECTED_DB_NAMES = frozenset({"aisoc", "postgres", "template0", "template1"})
+_SAFE_DB_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
+class UnsafePostgresTarget(ValueError):
+    """Raised when a PostgreSQL URL is not a local disposable verify database."""
 
 
 def _replace_database(url: str, name: str) -> str:
@@ -44,18 +51,44 @@ def _database_name(url: str) -> str:
     return urlparse(url).path.lstrip("/").split("?")[0]
 
 
-def _local_cluster_url() -> str | None:
+def _validate_disposable_target(url: str, *, expected_name: str = VERIFY_DB) -> str:
+    """Return the database name if the URL is a local disposable verify target.
+
+    Exception messages never include credentials or the raw URL.
+    """
+    parsed = urlparse(url)
+    if not parsed.scheme.startswith("postgresql"):
+        raise UnsafePostgresTarget("Phase 9 verify URL is not PostgreSQL")
+    host = (parsed.hostname or "").lower()
+    if host not in _LOCAL_HOSTS:
+        raise UnsafePostgresTarget("Phase 9 verify URL host is not a local disposable cluster")
+    name = _database_name(url)
+    if name in _PROTECTED_DB_NAMES or name == "":
+        raise UnsafePostgresTarget("Phase 9 verify URL targets a protected database name")
+    if not _SAFE_DB_NAME.match(name):
+        raise UnsafePostgresTarget("Phase 9 verify database name is not a safe identifier")
+    if name != expected_name:
+        raise UnsafePostgresTarget(
+            f"Phase 9 verify URL must use the dedicated disposable database {expected_name}"
+        )
+    return name
+
+
+def _resolve_verify_url() -> str | None:
     explicit = os.environ.get("AISOC_POSTGRES_TEST_URL", "").strip()
     if explicit:
+        _validate_disposable_target(explicit)
         return explicit
     get_settings.cache_clear()
     live = Settings()
     parsed = urlparse(live.database_url)
     if not parsed.scheme.startswith("postgresql"):
         return None
-    if (parsed.hostname or "") not in _LOCAL_HOSTS:
+    if (parsed.hostname or "").lower() not in _LOCAL_HOSTS:
         return None
-    return live.database_url
+    verify_url = _replace_database(live.database_url, VERIFY_DB)
+    _validate_disposable_target(verify_url)
+    return verify_url
 
 
 def _exec_autocommit(url: str, statement: str, **params: object) -> None:
@@ -65,6 +98,41 @@ def _exec_autocommit(url: str, statement: str, **params: object) -> None:
             connection.execute(text(statement), params)
     finally:
         engine.dispose()
+
+
+def _require_verify_name(name: str) -> None:
+    if name != VERIFY_DB:
+        raise UnsafePostgresTarget(
+            "Refusing to create or drop a database other than the Phase 9 verify database"
+        )
+
+
+def _drop_verify_database(admin_url: str) -> None:
+    _require_verify_name(VERIFY_DB)
+    _exec_autocommit(
+        admin_url,
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+        "WHERE datname = :name AND pid <> pg_backend_pid()",
+        name=VERIFY_DB,
+    )
+    _exec_autocommit(admin_url, f'DROP DATABASE IF EXISTS "{VERIFY_DB}"')
+
+
+def _create_verify_database(admin_url: str) -> None:
+    _require_verify_name(VERIFY_DB)
+    _exec_autocommit(admin_url, f'CREATE DATABASE "{VERIFY_DB}"')
+
+
+def _cleanup_throwaway(admin_url: str) -> None:
+    try:
+        _drop_verify_database(admin_url)
+    except Exception as exc:
+        warnings.warn(
+            f"Failed to drop disposable Phase 9 database {VERIFY_DB} "
+            f"({type(exc).__name__}). Remove it manually if it remains.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
 
 
 def _upgrade_schema(url: str) -> None:
@@ -82,55 +150,76 @@ def _upgrade_schema(url: str) -> None:
         get_settings.cache_clear()
 
 
-def test_phase9_postgres_url_refuses_live_aisoc() -> None:
-    assert _database_name("postgresql+psycopg://aisoc:aisoc@localhost:55432/aisoc") == _LIVE_DB
+def test_validate_disposable_target_refuses_live_aisoc() -> None:
+    with pytest.raises(UnsafePostgresTarget, match="protected database name"):
+        _validate_disposable_target("postgresql+psycopg://user:secret@localhost:55432/aisoc")
+
+
+def test_validate_disposable_target_refuses_remote_hosts() -> None:
+    with pytest.raises(UnsafePostgresTarget, match="not a local disposable cluster"):
+        _validate_disposable_target(
+            f"postgresql+psycopg://user:secret@db.example.com:5432/{VERIFY_DB}"
+        )
+
+
+def test_validate_disposable_target_refuses_maintenance_database() -> None:
+    with pytest.raises(UnsafePostgresTarget, match="protected database name"):
+        _validate_disposable_target("postgresql+psycopg://user:secret@127.0.0.1:5432/postgres")
+
+
+def test_validate_disposable_target_accepts_local_verify_db() -> None:
+    assert (
+        _validate_disposable_target(f"postgresql+psycopg://user:secret@127.0.0.1:55432/{VERIFY_DB}")
+        == VERIFY_DB
+    )
+
+
+def test_validate_disposable_target_hides_credentials() -> None:
+    with pytest.raises(UnsafePostgresTarget) as exc_info:
+        _validate_disposable_target(
+            "postgresql+psycopg://secretuser:secretpass@evil.example.com:5432/aisoc"
+        )
+    message = str(exc_info.value)
+    assert "secretpass" not in message
+    assert "secretuser" not in message
+    assert "evil.example.com" not in message
+
+
+def test_require_verify_name_refuses_other_databases() -> None:
+    with pytest.raises(UnsafePostgresTarget, match="other than the Phase 9 verify database"):
+        _require_verify_name("aisoc")
 
 
 @pytest.fixture(scope="module")
 def postgres_client() -> Generator[TestClient]:
-    cluster_url = _local_cluster_url()
-    if cluster_url is None:
+    try:
+        verify_url = _resolve_verify_url()
+    except UnsafePostgresTarget as exc:
+        pytest.skip(str(exc))
+    if verify_url is None:
         pytest.skip("No local PostgreSQL URL configured for Phase 9 verification")
 
-    explicit = os.environ.get("AISOC_POSTGRES_TEST_URL", "").strip()
-    verify_url = explicit or _replace_database(cluster_url, VERIFY_DB)
-    if _database_name(verify_url) == _LIVE_DB:
-        pytest.skip("Refusing PostgreSQL Phase 9 tests against the live aisoc database")
-
-    using_throwaway = _database_name(verify_url) == VERIFY_DB
-    admin_url = _maintenance_url(cluster_url if using_throwaway else verify_url)
-
+    admin_url = _maintenance_url(verify_url)
+    created = False
+    application = None
     try:
-        if using_throwaway:
-            _exec_autocommit(
-                admin_url,
-                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                "WHERE datname = :name AND pid <> pg_backend_pid()",
-                name=VERIFY_DB,
-            )
-            _exec_autocommit(admin_url, f'DROP DATABASE IF EXISTS "{VERIFY_DB}"')
-            _exec_autocommit(admin_url, f'CREATE DATABASE "{VERIFY_DB}"')
-        _upgrade_schema(verify_url)
-    except OperationalError as exc:
-        pytest.skip(f"PostgreSQL Phase 9 verify DB unavailable ({type(exc).__name__})")
-
-    application = create_app(build_settings(database_url=verify_url))
-    application.state.test_database_url = verify_url
-    with TestClient(application) as client:
-        yield client
-
-    if using_throwaway:
         try:
+            _drop_verify_database(admin_url)
+            _create_verify_database(admin_url)
+            created = True
+            _upgrade_schema(verify_url)
+        except OperationalError as exc:
+            pytest.skip(f"PostgreSQL Phase 9 verify DB unavailable ({type(exc).__name__})")
+
+        application = create_app(build_settings(database_url=verify_url))
+        application.state.test_database_url = verify_url
+        with TestClient(application) as client:
+            yield client
+    finally:
+        if application is not None:
             application.state.engine.dispose()
-            _exec_autocommit(
-                admin_url,
-                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                "WHERE datname = :name AND pid <> pg_backend_pid()",
-                name=VERIFY_DB,
-            )
-            _exec_autocommit(admin_url, f'DROP DATABASE IF EXISTS "{VERIFY_DB}"')
-        except Exception:
-            pass
+        if created:
+            _cleanup_throwaway(admin_url)
 
 
 def _ensure_two_actions(client: TestClient, incident_id: str) -> tuple[str, str]:
