@@ -145,12 +145,6 @@ class AuditLog(Base):
 
     __tablename__ = "audit_logs"
     __table_args__ = (
-        UniqueConstraint(
-            "resource_type",
-            "resource_id",
-            "event_type",
-            name="uq_audit_logs_resource_event",
-        ),
         Index("ix_audit_logs_occurred_at", "occurred_at"),
         Index("ix_audit_logs_incident_id", "incident_id"),
         Index("ix_audit_logs_resource", "resource_type", "resource_id"),

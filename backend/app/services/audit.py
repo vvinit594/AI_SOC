@@ -5,6 +5,11 @@ delete audit entries. Database administrators with direct SQL access can still
 alter rows; this is application-level append-only behaviour, not tamper-proof
 storage. Retention (how long to keep rows) is an operational decision and is
 not automated in Phase 8B.
+
+``details`` is schema-controlled per event type. Unsupported keys and invalid
+values are rejected. Duplicate event types for one resource are allowed; the
+approve/reject state machine, not a unique constraint, enforces decision
+idempotency.
 """
 
 from __future__ import annotations
@@ -14,11 +19,13 @@ import uuid
 from collections.abc import Mapping
 from typing import Any
 
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.time import utc_now
 from app.db.models import AuditLog, Incident
+from app.schemas.audit import ResponseActionDecisionDetails
 from app.schemas.enums import AuditEventType, AuditResourceType
 
 logger = logging.getLogger(__name__)
@@ -26,18 +33,7 @@ logger = logging.getLogger(__name__)
 _ALLOWED_EVENTS: frozenset[str] = frozenset(
     {"response_action.approved", "response_action.rejected"}
 )
-_ALLOWED_RESOURCES: frozenset[str] = frozenset({"response_action", "incident"})
-_FORBIDDEN_DETAIL_KEYS = frozenset(
-    {
-        "authorization",
-        "token",
-        "password",
-        "secret",
-        "api_key",
-        "bearer",
-        "analyst_api_token",
-    }
-)
+_ALLOWED_RESOURCES: frozenset[str] = frozenset({"response_action"})
 
 
 class AuditError(ValueError):
@@ -47,13 +43,16 @@ class AuditError(ValueError):
         self.status_code = status_code
 
 
-def _safe_details(details: Mapping[str, Any] | None) -> dict[str, Any]:
-    payload: dict[str, Any] = {}
-    for key, value in dict(details or {}).items():
-        if key.lower() in _FORBIDDEN_DETAIL_KEYS:
-            continue
-        payload[key] = value
-    return payload
+def _decision_details(event_type: str, details: Mapping[str, Any] | None) -> dict[str, Any]:
+    try:
+        parsed = ResponseActionDecisionDetails.model_validate(dict(details or {}))
+    except (ValidationError, TypeError, ValueError) as exc:
+        logger.warning("Rejected audit details for event_type=%s", event_type)
+        raise AuditError("Invalid audit event details", status_code=500) from exc
+    expected = f"response_action.{parsed.decision}"
+    if event_type != expected:
+        raise AuditError("Invalid audit event details", status_code=500)
+    return parsed.model_dump()
 
 
 def record_event(
@@ -78,6 +77,8 @@ def record_event(
     if actor not in {"analyst", "unverified"}:
         raise AuditError("Unsupported audit actor", status_code=500)
 
+    payload = _decision_details(event_type, details)
+
     row = AuditLog(
         occurred_at=utc_now(),
         event_type=event_type,
@@ -85,7 +86,7 @@ def record_event(
         resource_type=resource_type,
         resource_id=resource_id,
         incident_id=incident_id,
-        details=_safe_details(details),
+        details=payload,
     )
     session.add(row)
     logger.info(

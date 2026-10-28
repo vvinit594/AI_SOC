@@ -90,7 +90,7 @@ Re-running an investigation does not delete or reset approved/rejected rows and 
 
 ### Audit history (Phase 8B)
 
-A successful approve or reject inserts one `audit_logs` row in the **same transaction** as the action update. If the audit insert fails, the decision is rolled back. Repeating the same decision, 409 conflicts, and 404/422 errors do not write a success audit event.
+A successful approve or reject inserts one `audit_logs` row in the **same transaction** as the action update. If audit validation or insert fails, the decision is rolled back. Repeating the same decision, 409 conflicts, and 404/422 errors do not write a success audit event. `details` only accepts `decision`, `previous_approval_status`, `resulting_approval_status`, and `action_type`. There is no unique constraint on `(resource_type, resource_id, event_type)`.
 
 `GET /api/incidents/{id}/audit-logs` returns `{items, total}` newest-first (`occurred_at` descending) with the same pagination bounds as incident list (`limit` 1–500, default 100). It uses the same `ANALYST_API_TOKEN` policy as approve/reject. There is no endpoint to edit or delete audit rows. Application code is append-only; a DBA with SQL access can still change the table. Retention is not automated.
 

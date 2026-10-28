@@ -8,7 +8,15 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.db.models import AuditLog, ResponseAction
+from app.services.audit import AuditError, record_event
 from app.tests.test_actions import SECRET_TOKEN, _app_client, _insert_proposed, _reload_action
+
+_SAFE_DETAILS = {
+    "decision": "approved",
+    "previous_approval_status": "proposed",
+    "resulting_approval_status": "approved",
+    "action_type": "force_password_reset",
+}
 
 
 def _list_audits(client: TestClient, incident_id: uuid.UUID) -> list[AuditLog]:
@@ -233,3 +241,329 @@ def test_deleting_incident_does_not_delete_audit_rows(client: TestClient) -> Non
         assert remaining[0].resource_id == action_id
     finally:
         session.close()
+
+
+def test_same_resource_can_store_repeated_event_type(client: TestClient) -> None:
+    incident_id, action_id = _insert_proposed(client)
+    session = client.app.state.session_factory()
+    try:
+        record_event(
+            session,
+            event_type="response_action.approved",
+            actor="unverified",
+            resource_type="response_action",
+            resource_id=action_id,
+            incident_id=incident_id,
+            details=_SAFE_DETAILS,
+        )
+        record_event(
+            session,
+            event_type="response_action.approved",
+            actor="analyst",
+            resource_type="response_action",
+            resource_id=action_id,
+            incident_id=incident_id,
+            details=_SAFE_DETAILS,
+        )
+        session.commit()
+        rows = list(
+            session.scalars(select(AuditLog).where(AuditLog.resource_id == action_id)).all()
+        )
+        assert len(rows) == 2
+        assert {row.event_type for row in rows} == {"response_action.approved"}
+        assert {row.actor for row in rows} == {"unverified", "analyst"}
+    finally:
+        session.close()
+
+
+def test_safe_decision_metadata_is_persisted(client: TestClient) -> None:
+    incident_id, action_id = _insert_proposed(client)
+    assert client.post(f"/api/actions/{action_id}/approve").status_code == 200
+    row = _list_audits(client, incident_id)[0]
+    assert row.details == {
+        "decision": "approved",
+        "previous_approval_status": "proposed",
+        "resulting_approval_status": "approved",
+        "action_type": "force_password_reset",
+    }
+
+
+def test_unexpected_metadata_key_is_rejected(client: TestClient) -> None:
+    incident_id, action_id = _insert_proposed(client)
+    session = client.app.state.session_factory()
+    try:
+        with pytest.raises(AuditError, match="Invalid audit event details"):
+            record_event(
+                session,
+                event_type="response_action.approved",
+                actor="unverified",
+                resource_type="response_action",
+                resource_id=action_id,
+                incident_id=incident_id,
+                details={**_SAFE_DETAILS, "token": "should-not-be-stored"},
+            )
+        session.rollback()
+        assert list(session.scalars(select(AuditLog)).all()) == []
+    finally:
+        session.close()
+
+
+def test_invalid_metadata_value_is_rejected(client: TestClient) -> None:
+    incident_id, action_id = _insert_proposed(client)
+    session = client.app.state.session_factory()
+    try:
+        with pytest.raises(AuditError, match="Invalid audit event details"):
+            record_event(
+                session,
+                event_type="response_action.approved",
+                actor="unverified",
+                resource_type="response_action",
+                resource_id=action_id,
+                incident_id=incident_id,
+                details={**_SAFE_DETAILS, "decision": "maybe"},
+            )
+        session.rollback()
+    finally:
+        session.close()
+
+
+def test_oversized_metadata_string_is_rejected(client: TestClient) -> None:
+    incident_id, action_id = _insert_proposed(client)
+    session = client.app.state.session_factory()
+    try:
+        with pytest.raises(AuditError, match="Invalid audit event details"):
+            record_event(
+                session,
+                event_type="response_action.approved",
+                actor="unverified",
+                resource_type="response_action",
+                resource_id=action_id,
+                incident_id=incident_id,
+                details={**_SAFE_DETAILS, "action_type": "x" * 65},
+            )
+        session.rollback()
+        assert list(session.scalars(select(AuditLog)).all()) == []
+    finally:
+        session.close()
+
+
+def test_audit_validation_failure_rolls_back_decision(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = record_event
+
+    def _poisoned(
+        session: object,
+        *,
+        event_type: str,
+        actor: str,
+        resource_type: str,
+        resource_id: uuid.UUID,
+        incident_id: uuid.UUID | None = None,
+        details: dict[str, object] | None = None,
+    ) -> AuditLog:
+        payload = dict(details or {})
+        payload["authorization"] = "Bearer should-not-persist"
+        return original(
+            session,  # type: ignore[arg-type]
+            event_type=event_type,  # type: ignore[arg-type]
+            actor=actor,
+            resource_type=resource_type,  # type: ignore[arg-type]
+            resource_id=resource_id,
+            incident_id=incident_id,
+            details=payload,
+        )
+
+    monkeypatch.setattr("app.services.actions.record_event", _poisoned)
+    _, action_id = _insert_proposed(client)
+    with pytest.raises(AuditError, match="Invalid audit event details"):
+        client.post(f"/api/actions/{action_id}/approve")
+    stored = _reload_action(client, action_id)
+    assert stored.approval_status == "proposed"
+    assert stored.decided_at is None
+    session = client.app.state.session_factory()
+    try:
+        assert list(session.scalars(select(AuditLog)).all()) == []
+    finally:
+        session.close()
+
+
+def test_postgres_drops_audit_event_uniqueness_without_losing_rows() -> None:
+    import json
+    import os
+    from datetime import UTC, datetime
+    from pathlib import Path
+    from urllib.parse import urlparse
+
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.exc import OperationalError
+
+    from app.core.config import get_settings
+    from app.tests.test_phase5_postgres import (
+        _exec_autocommit,
+        _local_cluster_url,
+        _maintenance_url,
+        _replace_database,
+    )
+
+    cluster_url = _local_cluster_url()
+    if cluster_url is None:
+        pytest.skip("No local PostgreSQL URL configured for audit migration verification")
+
+    db_name = "aisoc_audit_mig_verify"
+    verify_url = _replace_database(cluster_url, db_name)
+    if urlparse(verify_url).path.lstrip("/") == "aisoc":
+        pytest.skip("Refusing to run migration verification against live aisoc")
+    admin_url = _maintenance_url(cluster_url)
+    alembic_ini = str(Path(__file__).resolve().parents[2] / "alembic.ini")
+
+    def _alembic(revision: str, *, downgrade: bool = False) -> None:
+        previous = os.environ.get("DATABASE_URL")
+        os.environ["DATABASE_URL"] = verify_url
+        get_settings.cache_clear()
+        try:
+            config = Config(alembic_ini)
+            if downgrade:
+                command.downgrade(config, revision)
+            else:
+                command.upgrade(config, revision)
+        finally:
+            if previous is None:
+                os.environ.pop("DATABASE_URL", None)
+            else:
+                os.environ["DATABASE_URL"] = previous
+            get_settings.cache_clear()
+            logging.getLogger().disabled = False
+            for logger in logging.Logger.manager.loggerDict.values():
+                if isinstance(logger, logging.Logger):
+                    logger.disabled = False
+
+    def _constraint_names(engine) -> set[str]:
+        with engine.connect() as connection:
+            rows = connection.execute(
+                text("SELECT conname FROM pg_constraint WHERE conrelid = 'audit_logs'::regclass")
+            )
+            return {row[0] for row in rows}
+
+    def _index_names(engine) -> set[str]:
+        with engine.connect() as connection:
+            rows = connection.execute(
+                text("SELECT indexname FROM pg_indexes WHERE tablename = 'audit_logs'")
+            )
+            return {row[0] for row in rows}
+
+    try:
+        _exec_autocommit(
+            admin_url,
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+            "WHERE datname = :name AND pid <> pg_backend_pid()",
+            name=db_name,
+        )
+        _exec_autocommit(admin_url, f'DROP DATABASE IF EXISTS "{db_name}"')
+        _exec_autocommit(admin_url, f'CREATE DATABASE "{db_name}"')
+    except OperationalError as exc:
+        pytest.skip(f"PostgreSQL audit migration verify DB unavailable ({type(exc).__name__})")
+
+    engine = create_engine(verify_url)
+    incident_id = uuid.uuid4()
+    resource_id = uuid.uuid4()
+    first_id = uuid.uuid4()
+    second_id = uuid.uuid4()
+    now = datetime.now(UTC)
+    details = json.dumps(_SAFE_DETAILS)
+    try:
+        _alembic("0004_audit_logs")
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO incidents (id, title, severity, status, summary, created_at) "
+                    "VALUES (:id, 'mig', 'low', 'open', 'mig', :created)"
+                ),
+                {"id": incident_id, "created": now},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO audit_logs "
+                    "(id, occurred_at, event_type, actor, resource_type, resource_id, "
+                    "incident_id, details) "
+                    "VALUES (:id, :occurred, 'response_action.approved', 'unverified', "
+                    "'response_action', :resource_id, :incident_id, CAST(:details AS json))"
+                ),
+                {
+                    "id": first_id,
+                    "occurred": now,
+                    "resource_id": resource_id,
+                    "incident_id": incident_id,
+                    "details": details,
+                },
+            )
+        assert "uq_audit_logs_resource_event" in _constraint_names(engine)
+
+        _alembic("0005_drop_audit_event_uniqueness")
+        names = _constraint_names(engine)
+        assert "uq_audit_logs_resource_event" not in names
+        indexes = _index_names(engine)
+        assert {
+            "ix_audit_logs_occurred_at",
+            "ix_audit_logs_incident_id",
+            "ix_audit_logs_resource",
+            "ix_audit_logs_event_type",
+        } <= indexes
+        with engine.begin() as connection:
+            remaining = connection.execute(
+                text("SELECT id FROM audit_logs WHERE id = :id"), {"id": first_id}
+            ).scalar()
+            assert remaining == first_id
+            connection.execute(
+                text(
+                    "INSERT INTO audit_logs "
+                    "(id, occurred_at, event_type, actor, resource_type, resource_id, "
+                    "incident_id, details) "
+                    "VALUES (:id, :occurred, 'response_action.approved', 'analyst', "
+                    "'response_action', :resource_id, :incident_id, CAST(:details AS json))"
+                ),
+                {
+                    "id": second_id,
+                    "occurred": now,
+                    "resource_id": resource_id,
+                    "incident_id": incident_id,
+                    "details": details,
+                },
+            )
+            count = connection.execute(text("SELECT count(*) FROM audit_logs")).scalar()
+            assert count == 2
+            fk = connection.execute(
+                text(
+                    "SELECT confdeltype FROM pg_constraint "
+                    "WHERE conrelid = 'audit_logs'::regclass AND contype = 'f'"
+                )
+            ).scalar()
+            assert fk == "n"
+            connection.execute(text("DELETE FROM audit_logs WHERE id = :id"), {"id": second_id})
+
+        _alembic("0004_audit_logs", downgrade=True)
+        assert "uq_audit_logs_resource_event" in _constraint_names(engine)
+        with engine.connect() as connection:
+            assert (
+                connection.execute(
+                    text("SELECT id FROM audit_logs WHERE id = :id"), {"id": first_id}
+                ).scalar()
+                == first_id
+            )
+
+        _alembic("head")
+        assert "uq_audit_logs_resource_event" not in _constraint_names(engine)
+    finally:
+        engine.dispose()
+        try:
+            _exec_autocommit(
+                admin_url,
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                "WHERE datname = :name AND pid <> pg_backend_pid()",
+                name=db_name,
+            )
+            _exec_autocommit(admin_url, f'DROP DATABASE IF EXISTS "{db_name}"')
+        except Exception:
+            pass
