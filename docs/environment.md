@@ -63,15 +63,16 @@ This document lists every environment variable the AI-SOC application reads, whe
 | `RULE_OUTBOUND_WINDOW_MINUTES` | no | `5` | no | R3 time window. |
 | `RULE_SEEDED_SUSPICIOUS_IPS` | no | `198.51.100.88` | no | Comma-separated destinations that fire R3 on any connection (demo indicator). |
 
-### Security (Phase 8A token; Phase 9 rate limits)
+### Security (Phase 8A token; Phase 9 proxy)
 
 | Variable | Required | Default | Secret | Description |
 |----------|----------|---------|--------|-------------|
 | `ANALYST_API_TOKEN` | production: yes | empty (`None`) | **yes** | Shared bearer token for `POST /api/actions/{id}/approve`, `/reject`, `GET /api/incidents/{id}/audit-logs`, and `GET /api/incidents/{id}/report`. See behavior below. Not used for per-user identity. |
-| `RATE_LIMIT_INVESTIGATE_PER_MINUTE` | no | `5` | no | Rate limit for `POST /api/incidents/{id}/investigate`. **Not implemented in Phase 8A.** |
-| `RATE_LIMIT_UPLOAD_PER_MINUTE` | no | `10` | no | Rate limit for `POST /api/logs/upload`. **Not implemented in Phase 8A.** |
+| `AISOC_POSTGRES_TEST_URL` | no | unset | **yes** | Optional disposable PostgreSQL URL for integration tests. Must not be the live `aisoc` database. When unset, tests may create `aisoc_phase5_verify` / `aisoc_phase9_verify` on a local cluster. |
+| `RATE_LIMIT_INVESTIGATE_PER_MINUTE` | no | `5` | no | Rate limit for `POST /api/incidents/{id}/investigate`. **Not implemented.** |
+| `RATE_LIMIT_UPLOAD_PER_MINUTE` | no | `10` | no | Rate limit for `POST /api/logs/upload`. **Not implemented.** |
 
-#### `ANALYST_API_TOKEN` behavior (Phase 8A)
+#### `ANALYST_API_TOKEN` behavior (Phase 8A / 9)
 
 The token is compared with `Authorization: Bearer <token>` using a length-hiding digest compare. Token values are never logged or returned. An `X-Analyst-Id` header is ignored and is not proof of identity.
 
@@ -88,18 +89,33 @@ Limitations: this is a **shared** token. It identifies only the generic actor `a
 
 Phase 8B audit rows are append-only in application code. A database administrator with SQL access can still update or delete `audit_logs`. There is no automated retention or purge.
 
+Phase 9 does not implement rate limits. Do not treat the commented `RATE_LIMIT_*` examples as live controls.
+
 ---
 
 ## Frontend (`frontend/.env.local`)
 
+Public variables are bundled into the browser. Server-only variables are read by Next.js Route Handlers and must never use the `NEXT_PUBLIC_` prefix.
+
 | Variable | Required | Default | Secret | Description |
 |----------|----------|---------|--------|-------------|
-| `NEXT_PUBLIC_API_BASE_URL` | yes | `http://localhost:8000` | no | Base URL of the FastAPI backend. In production, the deployed API URL (HTTPS). Redeploy after changing. |
+| `NEXT_PUBLIC_API_BASE_URL` | yes | `http://localhost:8000` | no | FastAPI origin for **public** browser calls (`GET /health`, `GET /api/incidents`, investigation SSE). Redeploy after changing. |
 | `NEXT_PUBLIC_APP_NAME` | no | `AI-SOC` | no | Display name in the UI header. |
+| `ANALYST_API_TOKEN` | when backend token is set | empty | **yes** | Server-only. Injected by `app/api/analyst/[...path]` onto FastAPI. Never name this `NEXT_PUBLIC_ANALYST_API_TOKEN`. |
+| `API_UPSTREAM_URL` | no | `NEXT_PUBLIC_API_BASE_URL` or `http://localhost:8000` | no | Server-only FastAPI origin used by the analyst proxy. Not an open-proxy URL parameter. |
 
-Phase 8D Response Center, audit history, and report download call FastAPI from the browser using `NEXT_PUBLIC_API_BASE_URL`. They do **not** send `Authorization`. There is no `NEXT_PUBLIC_ANALYST_API_TOKEN` and one must never be added — that would bundle a secret into client JavaScript.
+There is no `NEXT_PUBLIC_ANALYST_API_TOKEN` and one must never be added.
 
-Supported UI path: backend `ANALYST_API_TOKEN` empty in development/test, so approve/reject/audit/report succeed as actor `unverified`. If the backend token is set, those requests return 401 and the UI shows that error. Production with an empty token returns 403. Browser session login is not in v1.
+The `/api/analyst` proxy allowlists only:
+
+- `POST /api/analyst/actions/{uuid}/approve`
+- `POST /api/analyst/actions/{uuid}/reject`
+- `GET /api/analyst/incidents/{uuid}/audit-logs`
+- `GET /api/analyst/incidents/{uuid}/report`
+
+It is enabled when `NODE_ENV` is not `production`. In production it returns 403 `analyst_proxy_disabled` because this app has no authenticated user session. A shared token on the server is not login. Direct FastAPI production calls still require `ANALYST_API_TOKEN` on the backend; an empty production token returns 403.
+
+Local development: leave both backend and Next.js `ANALYST_API_TOKEN` empty so decisions record actor `unverified`. If the backend token is set, set the same value in `frontend/.env.local` as a **server-only** variable.
 
 ---
 
@@ -113,8 +129,15 @@ On a host where both Windows PostgreSQL and Docker publish `5432`, `localhost:54
 |----------|---------|--------|-------------|
 | `POSTGRES_USER` | `aisoc` | **yes** | Database user created by the Postgres container. |
 | `POSTGRES_PASSWORD` | `aisoc` | **yes** | Local-only development password. Use a strong value in any shared environment. |
-| `POSTGRES_DB` | `aisoc` | no | Database name. |
+| `POSTGRES_DB` | `aisoc` | no | Database name. **Never point pytest at this live database.** |
 | `POSTGRES_PORT` | `5432` | no | Host port mapped to the container. |
+
+PostgreSQL integration tests (`backend/app/tests/test_phase5_postgres.py`, `test_phase9_postgres.py`) create throwaway databases `aisoc_phase5_verify` and `aisoc_phase9_verify` on the local cluster, or use `AISOC_POSTGRES_TEST_URL` when set. If that URL's database name is `aisoc`, Phase 9 tests skip instead of writing to the live database.
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m pytest app/tests/test_phase9_postgres.py -q
+```
 
 ---
 
@@ -123,7 +146,8 @@ On a host where both Windows PostgreSQL and Docker publish `5432`, `localhost:54
 | Variable | Set where |
 |----------|-----------|
 | `DATABASE_URL`, `LLM_*`, `THREAT_INTEL_*`, `ANALYST_API_TOKEN`, `CORS_ALLOWED_ORIGINS` | Backend host secret settings |
-| `NEXT_PUBLIC_API_BASE_URL` | Vercel project environment variables |
+| `NEXT_PUBLIC_API_BASE_URL`, `NEXT_PUBLIC_APP_NAME` | Frontend public env (browser-safe only) |
+| `ANALYST_API_TOKEN`, `API_UPSTREAM_URL` | Next.js **server-only** env for local/dev proxy. Do not set `NEXT_PUBLIC_ANALYST_API_TOKEN`. Production disables the proxy until login exists. |
 | `POSTGRES_*` | Managed PostgreSQL provider (connection string exported as `DATABASE_URL`) |
 
 ---

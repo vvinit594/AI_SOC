@@ -166,6 +166,36 @@ def test_audit_history_is_newest_first_and_paginated(client: TestClient) -> None
     assert page.json()["items"][0]["event_type"] == "response_action.rejected"
 
 
+def test_audit_history_is_isolated_to_the_requested_incident(client: TestClient) -> None:
+    first_incident, first_action = _insert_proposed(client)
+    second_incident, second_action = _insert_proposed(client)
+    assert client.post(f"/api/actions/{first_action}/approve").status_code == 200
+    assert client.post(f"/api/actions/{second_action}/reject").status_code == 200
+    listed = client.get(f"/api/incidents/{first_incident}/audit-logs")
+    assert listed.status_code == 200
+    body = listed.json()
+    assert body["total"] == 1
+    assert body["items"][0]["incident_id"] == str(first_incident)
+    assert body["items"][0]["event_type"] == "response_action.approved"
+    assert str(second_action) not in listed.text
+    assert "response_action.rejected" not in listed.text
+
+
+def test_configured_token_rejects_missing_audit_read() -> None:
+    with _app_client(app_env="development", analyst_api_token=SECRET_TOKEN) as client:
+        incident_id, _action_id = _insert_proposed(client)
+        missing = client.get(f"/api/incidents/{incident_id}/audit-logs")
+        valid = client.get(
+            f"/api/incidents/{incident_id}/audit-logs",
+            headers={"Authorization": f"Bearer {SECRET_TOKEN}"},
+        )
+        assert missing.status_code == 401
+        assert missing.json()["detail"] == "Invalid or missing analyst token"
+        assert SECRET_TOKEN not in missing.text
+        assert valid.status_code == 200
+        assert valid.json()["total"] == 0
+
+
 def test_audit_logs_unknown_incident_404(client: TestClient) -> None:
     missing = uuid.UUID("00000000-0000-4000-8000-000000000099")
     response = client.get(f"/api/incidents/{missing}/audit-logs")

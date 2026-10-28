@@ -429,6 +429,63 @@ def test_report_download_does_not_mutate_phase8_state(client: TestClient) -> Non
     assert listed.json()["actions"][0]["approval_status"] == "approved"
 
 
+def test_report_audit_limit_distinguishes_full_page_from_truncation(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.services import reports as reports_service
+
+    monkeypatch.setattr(reports_service, "AUDIT_REPORT_LIMIT", 2)
+    incident_id, action_id, _extra = _insert_report_fixture(client, extra_action=None)
+    session = client.app.state.session_factory()
+    try:
+        for index in range(2):
+            session.add(
+                AuditLog(
+                    event_type="response_action.approved",
+                    actor="unverified",
+                    resource_type="response_action",
+                    resource_id=action_id,
+                    incident_id=incident_id,
+                    details={
+                        "decision": "approved",
+                        "previous_approval_status": "proposed",
+                        "resulting_approval_status": "approved",
+                        "action_type": f"limit-{index}",
+                    },
+                )
+            )
+        session.commit()
+    finally:
+        session.close()
+    exact = client.get(f"/api/incidents/{incident_id}/report")
+    exact_doc = _assert_html_download(exact, incident_id)
+    assert "older events are omitted" not in exact_doc
+    session = client.app.state.session_factory()
+    try:
+        session.add(
+            AuditLog(
+                event_type="response_action.rejected",
+                actor="unverified",
+                resource_type="response_action",
+                resource_id=action_id,
+                incident_id=incident_id,
+                details={
+                    "decision": "rejected",
+                    "previous_approval_status": "proposed",
+                    "resulting_approval_status": "rejected",
+                    "action_type": "limit-extra",
+                },
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+    truncated = client.get(f"/api/incidents/{incident_id}/report")
+    truncated_doc = _assert_html_download(truncated, incident_id)
+    assert "older events are omitted" in truncated_doc
+    assert "Showing the 2 most recent audit events" in truncated_doc
+
+
 def test_report_includes_live_investigation_without_claiming_execution(
     client: TestClient,
 ) -> None:

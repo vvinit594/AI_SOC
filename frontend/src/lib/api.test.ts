@@ -84,12 +84,12 @@ describe("response and report API client", () => {
     expect(incidents[0]?.actions[0]?.executionStatus).toBe("not_executed");
   });
 
-  it("approves through POST /api/actions/{id}/approve and uses the server body", async () => {
+  it("approves through the same-origin analyst proxy and uses the server body", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, actionPayload));
     vi.stubGlobal("fetch", fetchMock);
     const result = await approveAction(ACTION_ID);
     expect(fetchMock).toHaveBeenCalledWith(
-      `${API_BASE_URL}/api/actions/${ACTION_ID}/approve`,
+      `/api/analyst/actions/${ACTION_ID}/approve`,
       expect.objectContaining({ method: "POST" }),
     );
     expect(result.approval_status).toBe("approved");
@@ -104,7 +104,7 @@ describe("response and report API client", () => {
     vi.stubGlobal("fetch", fetchMock);
     const result = await rejectAction(ACTION_ID);
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      `${API_BASE_URL}/api/actions/${ACTION_ID}/reject`,
+      `/api/analyst/actions/${ACTION_ID}/reject`,
     );
     expect(result.approval_status).toBe("rejected");
   });
@@ -155,7 +155,7 @@ describe("response and report API client", () => {
     vi.stubGlobal("fetch", fetchMock);
     const items = await listIncidentAuditLogs(INCIDENT_ID);
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      `${API_BASE_URL}/api/incidents/${INCIDENT_ID}/audit-logs`,
+      `/api/analyst/incidents/${INCIDENT_ID}/audit-logs`,
     );
     expect(items).toHaveLength(1);
     expect(items[0]?.eventType).toBe("response_action.approved");
@@ -176,7 +176,7 @@ describe("response and report API client", () => {
     vi.stubGlobal("fetch", fetchMock);
     const report = await downloadIncidentReport(INCIDENT_ID);
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      `${API_BASE_URL}/api/incidents/${INCIDENT_ID}/report`,
+      `/api/analyst/incidents/${INCIDENT_ID}/report`,
     );
     expect(report.filename).toBe(`incident-${INCIDENT_ID}-report.html`);
     expect(report.contentType).toContain("text/html");
@@ -215,5 +215,36 @@ describe("response and report API client", () => {
     await expect(downloadIncidentReport(INCIDENT_ID)).rejects.toMatchObject({
       code: "unexpected_content_type",
     });
+  });
+
+  it("propagates aborted requests", async () => {
+    const abort = Object.assign(new Error("Aborted"), { name: "AbortError" });
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(abort));
+    await expect(listIncidentAuditLogs(INCIDENT_ID)).rejects.toMatchObject({
+      name: "AbortError",
+    });
+  });
+
+  it("treats malformed JSON error bodies as a status failure without leaking secrets", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response("{not-json ANALYST_API_TOKEN=leaked}", {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    await expect(approveAction(ACTION_ID)).rejects.toMatchObject({
+      status: 500,
+      message: "Request failed with status 500",
+    });
+  });
+
+  it("keeps public incident reads on the FastAPI origin", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, incidentPayload));
+    vi.stubGlobal("fetch", fetchMock);
+    await getIncidentApi(INCIDENT_ID);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(`${API_BASE_URL}/api/incidents/${INCIDENT_ID}`);
   });
 });

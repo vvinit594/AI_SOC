@@ -6,6 +6,7 @@ import {
   type IncidentApiItem,
   type IncidentListApi,
 } from "@/lib/actions";
+import { analystProxyUrl, isAbortError } from "@/lib/analyst-proxy";
 import { API_BASE_URL } from "@/lib/constants";
 import { isHtmlContentType, safeReportFilename } from "@/lib/report";
 import type { AgentName, AgentRunStatus, AuditLogEntry, PersistedIncident } from "@/lib/types";
@@ -36,6 +37,9 @@ type ErrorBody = {
 };
 
 function apiUrl(path: string): string {
+  if (path.startsWith("/api/analyst/")) {
+    return path;
+  }
   const base = API_BASE_URL.replace(/\/$/, "");
   const suffix = path.startsWith("/") ? path : `/${path}`;
   return `${base}${suffix}`;
@@ -46,7 +50,11 @@ async function parseJson(response: Response): Promise<unknown> {
   if (!contentType.includes("application/json")) {
     return null;
   }
-  return response.json();
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
 }
 
 async function jsonRequest<T>(
@@ -62,7 +70,7 @@ async function jsonRequest<T>(
       signal,
     });
   } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") {
+    if (isAbortError(error)) {
       throw error;
     }
     throw new ApiError("Unable to reach the API", 0, "network_error");
@@ -139,7 +147,7 @@ export async function listIncidentAuditLogs(
   signal?: AbortSignal,
 ): Promise<AuditLogEntry[]> {
   const payload = await apiGet<AuditLogListApi>(
-    `/api/incidents/${incidentId}/audit-logs`,
+    analystProxyUrl(`/api/incidents/${incidentId}/audit-logs`),
     signal,
   );
   return payload.items.map(mapAuditLog);
@@ -149,14 +157,14 @@ export async function approveAction(
   actionId: string,
   signal?: AbortSignal,
 ): Promise<ActionDecisionApi> {
-  return apiPost<ActionDecisionApi>(`/api/actions/${actionId}/approve`, signal);
+  return apiPost<ActionDecisionApi>(analystProxyUrl(`/api/actions/${actionId}/approve`), signal);
 }
 
 export async function rejectAction(
   actionId: string,
   signal?: AbortSignal,
 ): Promise<ActionDecisionApi> {
-  return apiPost<ActionDecisionApi>(`/api/actions/${actionId}/reject`, signal);
+  return apiPost<ActionDecisionApi>(analystProxyUrl(`/api/actions/${actionId}/reject`), signal);
 }
 
 export type DownloadedReport = {
@@ -171,13 +179,13 @@ export async function downloadIncidentReport(
 ): Promise<DownloadedReport> {
   let response: Response;
   try {
-    response = await fetch(apiUrl(`/api/incidents/${incidentId}/report`), {
+    response = await fetch(apiUrl(analystProxyUrl(`/api/incidents/${incidentId}/report`)), {
       method: "GET",
       headers: { Accept: "text/html" },
       signal,
     });
   } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") {
+    if (isAbortError(error)) {
       throw error;
     }
     throw new ApiError("Unable to reach the API", 0, "network_error");

@@ -50,17 +50,24 @@ export function isHtmlContentType(contentType: string | null): boolean {
   return value.includes("text/html");
 }
 
-export function saveBlob(blob: Blob, filename: string): void {
+export const BLOB_URL_REVOKE_MS = 60_000;
+
+export function saveBlob(
+  blob: Blob,
+  filename: string,
+  revokeAfterMs = BLOB_URL_REVOKE_MS,
+): () => void {
   const url = URL.createObjectURL(blob);
-  try {
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = filename;
-    anchor.rel = "noopener";
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-  } finally {
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.rel = "noopener";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  const timer = setTimeout(() => URL.revokeObjectURL(url), revokeAfterMs);
+  return () => {
+    clearTimeout(timer);
     URL.revokeObjectURL(url);
-  }
+  };
 }

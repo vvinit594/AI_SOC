@@ -7,7 +7,8 @@ describe("analyst error mapping", () => {
   it("explains 401 without exposing a token workaround", () => {
     const message = analystErrorMessage(new ApiError("nope", 401, "http_error"));
     expect(message.toLowerCase()).toContain("token");
-    expect(message).not.toMatch(/NEXT_PUBLIC_/);
+    expect(message).toContain("not NEXT_PUBLIC_");
+    expect(message).not.toMatch(/NEXT_PUBLIC_ANALYST_API_TOKEN\s*=/);
     expect(message.toLowerCase()).toContain("browser");
   });
 
@@ -15,6 +16,12 @@ describe("analyst error mapping", () => {
     expect(analystErrorMessage(new ApiError("forbidden", 403, "http_error"))).toContain(
       "production authentication is not configured",
     );
+  });
+
+  it("explains a disabled production proxy without treating it as login", () => {
+    expect(
+      analystErrorMessage(new ApiError("disabled", 403, "analyst_proxy_disabled")),
+    ).toContain("no login session");
   });
 
   it("maps 404, 409, and network failures", () => {

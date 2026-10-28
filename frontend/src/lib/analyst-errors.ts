@@ -12,10 +12,13 @@ export function analystErrorMessage(error: unknown): string {
       return "Unable to reach the API.";
     case 401:
       return (
-        "Missing or invalid analyst token. This UI does not send ANALYST_API_TOKEN " +
-        "from the browser. Development works when the backend token is empty."
+        "Missing or invalid analyst token. The browser never receives ANALYST_API_TOKEN. " +
+        "In development, set it only on the Next.js server (not NEXT_PUBLIC_) or leave the backend token empty."
       );
     case 403:
+      if (error.code === "analyst_proxy_disabled") {
+        return "Analyst operations are disabled in production because this app has no login session.";
+      }
       return "Analyst decisions are unavailable because production authentication is not configured.";
     case 404:
       return "The requested incident or action was not found.";

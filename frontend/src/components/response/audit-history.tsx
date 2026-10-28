@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { listIncidentAuditLogs } from "@/lib/api";
 import { analystErrorMessage } from "@/lib/analyst-errors";
-import { formatUtc, shortId } from "@/lib/format";
+import { formatDetailValue, formatUtc, shortId } from "@/lib/format";
 import type { AuditLogEntry } from "@/lib/types";
 
 function detailText(details: Record<string, unknown>): string {
@@ -13,7 +13,7 @@ function detailText(details: Record<string, unknown>): string {
   if (keys.length === 0) {
     return "—";
   }
-  return keys.map((key) => `${key}=${String(details[key])}`).join(", ");
+  return keys.map((key) => `${key}=${formatDetailValue(details[key])}`).join(", ");
 }
 
 export function AuditHistory({

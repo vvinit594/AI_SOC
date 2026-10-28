@@ -14,6 +14,20 @@ export function shortId(id: string, prefix = 8): string {
   return id.slice(0, prefix);
 }
 
+export function formatDetailValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "";
+  }
+}
+
 export function severityLabel(severity: Severity): string {
   return severity.charAt(0).toUpperCase() + severity.slice(1);
 }

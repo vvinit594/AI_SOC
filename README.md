@@ -2,7 +2,7 @@
 
 An Agentic AI Security Operations Center (SOC) that ingests security logs, detects suspicious activity with transparent rules, coordinates specialized LangGraph agents to investigate incidents, enriches indicators with real threat intelligence, maps behaviour to MITRE ATT&CK, and recommends a safe, human-approved response — all through a live security dashboard.
 
-> **Status:** Phase 8D (Response Center and Reports frontend integration) complete. Phase 9 testing and hardening has not started. See [`docs/MVP_SPEC.md`](docs/MVP_SPEC.md) for the frozen v1 scope.
+> **Status:** Phase 9 (testing, security hardening, and integration verification) implemented. Phase 10 Dockerization has not started. See [`docs/MVP_SPEC.md`](docs/MVP_SPEC.md) for the frozen v1 scope.
 
 ---
 
@@ -105,7 +105,7 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Incident tables still use mock data. The header health indicator calls `GET /health` on the FastAPI backend.
+Open [http://localhost:3000](http://localhost:3000). Live backend data is used by Response Center, persisted incident detail, audit history, and HTML report download. Overview, event explorer, the incidents list, dashboard metrics, and ATT&CK/root-cause narrative remain Phase 2 mock snapshots unless a matching mock ID exists. The header health indicator calls `GET /health`.
 
 ```bash
 npm run build    # production build check
@@ -137,14 +137,26 @@ On macOS or Linux, activate `.venv` and run `alembic upgrade head`, `python -m a
 - Incidents: [http://localhost:8000/api/incidents](http://localhost:8000/api/incidents)
 - Docs: [http://localhost:8000/docs](http://localhost:8000/docs)
 
-Pytest uses an in-memory SQLite database and does not require Docker:
+Pytest uses an in-memory SQLite database for most tests and does not require Docker. PostgreSQL integration tests use a disposable database (`aisoc_phase5_verify` / `aisoc_phase9_verify`) and skip if they would touch live `aisoc`:
 
 ```bash
 .venv\Scripts\python.exe -m pytest
-.venv\Scripts\ruff.exe check app
+.venv\Scripts\python.exe -m ruff check app
+.venv\Scripts\python.exe -m ruff format --check .
 ```
 
-The frontend still reads Phase 2 mock data. Backend `GET /api/events` and `GET /api/incidents` persist the same demo IDs; the UI swap is a later wiring step, not Phase 6.
+Frontend checks (from `frontend/`):
+
+```bash
+npm test
+npx tsc --noEmit
+npm run lint
+npm run build
+```
+
+There is no Playwright suite in this repository. Browser verification of the Response Center remains a manual procedure (see `frontend/README.md`).
+
+Protected analyst UI calls go through same-origin `/api/analyst` in development/test. The browser never receives `ANALYST_API_TOKEN`. Production disables that proxy because there is no login session.
 
 The final target is a single command:
 
@@ -165,7 +177,7 @@ docker compose up --build
 | 6 | Agentic AI workflow (LangGraph) | ✅ Done |
 | 7 | Live investigation progress (SSE) | ✅ Done |
 | 8 | Response center & incident reports | ✅ Done |
-| 9 | Testing & security hardening | ⏳ |
+| 9 | Testing & security hardening | ✅ Done |
 | 10 | Dockerize | ⏳ |
 | 11 | Deploy & go live | ⏳ |
 | 12 | Final demo preparation | ⏳ |

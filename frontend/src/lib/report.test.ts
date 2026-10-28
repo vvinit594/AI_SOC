@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   fallbackReportFilename,
@@ -6,6 +6,7 @@ import {
   isSafeReportFilename,
   parseContentDispositionFilename,
   safeReportFilename,
+  saveBlob,
 } from "@/lib/report";
 
 const INCIDENT_ID = "a1e0c3f2-4b91-4d2a-9c18-11b0a0b7e001";
@@ -56,5 +57,37 @@ describe("report filename handling", () => {
     expect(isHtmlContentType("text/html; charset=utf-8")).toBe(true);
     expect(isHtmlContentType("application/json")).toBe(false);
     expect(isHtmlContentType(null)).toBe(false);
+  });
+});
+
+describe("saveBlob object URL lifecycle", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("revokes the object URL after a delay, not immediately after click", () => {
+    vi.useFakeTimers();
+    const createObjectURL = vi.fn(() => "blob:test-url");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
+    const click = vi.fn();
+    const remove = vi.fn();
+    const appendChild = vi.fn();
+    const anchor = { href: "", download: "", rel: "", click, remove };
+    vi.stubGlobal("document", {
+      createElement: () => anchor,
+      body: { appendChild },
+    });
+
+    const cleanup = saveBlob(new Blob(["report"]), "incident-report.html", 1_000);
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(999);
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:test-url");
+    cleanup();
   });
 });

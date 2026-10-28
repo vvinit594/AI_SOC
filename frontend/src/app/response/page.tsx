@@ -14,10 +14,11 @@ export default function ResponsePage() {
         description="Human-in-the-loop approval for simulated remediation. Nothing is blocked, isolated, or disabled in v1."
       />
       <MockBanner>
-        Approve and reject call the persisted backend APIs. Development works when{" "}
-        <code className="font-mono text-xs">ANALYST_API_TOKEN</code> is empty on the backend.
-        The browser never receives that secret. Approval records a decision; it does not
-        execute containment.
+        Approve, reject, audit history, and report download go through the same-origin{" "}
+        <code className="font-mono text-xs">/api/analyst</code> proxy in development and test.
+        The browser never receives <code className="font-mono text-xs">ANALYST_API_TOKEN</code>.
+        Production disables the proxy until a login session exists. Approval records a
+        decision; it does not execute containment.
       </MockBanner>
       <ResponseCenter />
     </div>

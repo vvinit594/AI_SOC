@@ -27,6 +27,7 @@ from app.services.investigations import _latest_investigation
 _RULE_RE = re.compile(r"\bR[123]\b")
 _NODE_ORDER = {name: index for index, name in enumerate(NODE_NAMES)}
 _NOT_PERFORMED = "Not performed. Simulated recommendation only; no live containment occurred."
+AUDIT_REPORT_LIMIT = 500
 
 
 class ReportError(ValueError):
@@ -71,7 +72,7 @@ def _render(session: Session, incident: Incident, generated_at: datetime) -> str
     events = _load_events(session, incident)
     investigation = _latest_investigation(session, incident.id)
     actions = sorted(incident.response_actions, key=lambda item: (item.created_at, item.id))
-    audits = _load_audits(session, incident.id)
+    audits, audits_truncated = _load_audits(session, incident.id)
     title = _esc(incident.title or "Untitled incident")
     generated = _when(generated_at)
     return (
@@ -95,7 +96,7 @@ def _render(session: Session, incident: Incident, generated_at: datetime) -> str
         f"{_section_events(events)}\n"
         f"{_section_investigation(investigation)}\n"
         f"{_section_actions(actions)}\n"
-        f"{_section_audits(audits)}\n"
+        f"{_section_audits(audits, audits_truncated)}\n"
         "</body>\n"
         "</html>\n"
     )
@@ -324,18 +325,20 @@ def _section_actions(actions: list[ResponseAction]) -> str:
     return "<section><h2>Recommended response actions</h2>" + notice + table + "</section>"
 
 
-def _load_audits(session: Session, incident_id: uuid.UUID) -> list[AuditLog]:
-    return list(
+def _load_audits(session: Session, incident_id: uuid.UUID) -> tuple[list[AuditLog], bool]:
+    items = list(
         session.scalars(
             select(AuditLog)
             .where(AuditLog.incident_id == incident_id)
             .order_by(AuditLog.occurred_at.desc(), AuditLog.id.desc())
-            .limit(500)
+            .limit(AUDIT_REPORT_LIMIT + 1)
         ).all()
     )
+    truncated = len(items) > AUDIT_REPORT_LIMIT
+    return items[:AUDIT_REPORT_LIMIT], truncated
 
 
-def _section_audits(audits: list[AuditLog]) -> str:
+def _section_audits(audits: list[AuditLog], truncated: bool) -> str:
     heading = "<section><h2>Approval and rejection history</h2>"
     if not audits:
         body = '<p class="muted">No audit events recorded for this incident.</p>'
@@ -357,8 +360,11 @@ def _section_audits(audits: list[AuditLog]) -> str:
             "</tr>"
         )
     note = ""
-    if len(audits) >= 500:
-        note = '<p class="muted">Showing the 500 most recent audit events for this incident.</p>'
+    if truncated:
+        note = (
+            f'<p class="muted">Showing the {AUDIT_REPORT_LIMIT} most recent audit events; '
+            "older events are omitted.</p>"
+        )
     table = (
         "<table><thead><tr>"
         "<th>Occurred at</th><th>Event</th><th>Actor</th>"
