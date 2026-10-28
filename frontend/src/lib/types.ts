@@ -28,6 +28,8 @@ export type ThreatIntelStatus = "ok" | "unavailable" | "unknown";
 
 export type ActionStatus = "proposed" | "approved" | "rejected";
 
+export type ExecutionStatus = "not_executed" | "simulated" | "failed";
+
 export type RiskLevel = "low" | "medium" | "high";
 
 export type SecurityEvent = {
@@ -120,15 +122,38 @@ export type ResponseAction = {
   id: string;
   incidentId: string;
   actionType: string;
-  target: string;
+  target: string | null;
   reason: string;
-  evidenceIds: string[];
   riskLevel: RiskLevel;
-  approvalRequired: boolean;
-  status: ActionStatus;
-  simulated: true;
-  decidedAt?: string;
-  decidedBy?: string;
+  approvalStatus: ActionStatus;
+  executionStatus: ExecutionStatus;
+  simulated: boolean;
+  createdAt: string;
+  decidedAt: string | null;
+  actor: string | null;
+};
+
+export type PersistedIncident = {
+  id: string;
+  title: string;
+  severity: Severity;
+  status: IncidentStatus;
+  summary: string;
+  scenario: string | null;
+  createdAt: string;
+  eventIds: string[];
+  actions: ResponseAction[];
+};
+
+export type AuditLogEntry = {
+  id: string;
+  occurredAt: string;
+  eventType: string;
+  actor: string;
+  resourceType: string;
+  resourceId: string;
+  incidentId: string | null;
+  details: Record<string, unknown>;
 };
 
 export type IncidentReport = {

@@ -1,5 +1,14 @@
+import {
+  mapAuditLog,
+  mapIncident,
+  type ActionDecisionApi,
+  type AuditLogListApi,
+  type IncidentApiItem,
+  type IncidentListApi,
+} from "@/lib/actions";
 import { API_BASE_URL } from "@/lib/constants";
-import type { AgentName, AgentRunStatus } from "@/lib/types";
+import { isHtmlContentType, safeReportFilename } from "@/lib/report";
+import type { AgentName, AgentRunStatus, AuditLogEntry, PersistedIncident } from "@/lib/types";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -40,11 +49,15 @@ async function parseJson(response: Response): Promise<unknown> {
   return response.json();
 }
 
-export async function apiGet<T>(path: string, signal?: AbortSignal): Promise<T> {
+async function jsonRequest<T>(
+  path: string,
+  method: "GET" | "POST",
+  signal?: AbortSignal,
+): Promise<T> {
   let response: Response;
   try {
     response = await fetch(apiUrl(path), {
-      method: "GET",
+      method,
       headers: { Accept: "application/json" },
       signal,
     });
@@ -65,6 +78,14 @@ export async function apiGet<T>(path: string, signal?: AbortSignal): Promise<T> 
     );
   }
   return body as T;
+}
+
+export async function apiGet<T>(path: string, signal?: AbortSignal): Promise<T> {
+  return jsonRequest<T>(path, "GET", signal);
+}
+
+export async function apiPost<T>(path: string, signal?: AbortSignal): Promise<T> {
+  return jsonRequest<T>(path, "POST", signal);
 }
 
 export function getHealth(signal?: AbortSignal): Promise<HealthResponse> {
@@ -96,3 +117,96 @@ export function getInvestigationApi(
     signal,
   );
 }
+
+export async function listIncidentsApi(signal?: AbortSignal): Promise<PersistedIncident[]> {
+  const listed = await apiGet<IncidentListApi>("/api/incidents", signal);
+  const detailed = await Promise.all(
+    listed.items.map((item) => apiGet<IncidentApiItem>(`/api/incidents/${item.id}`, signal)),
+  );
+  return detailed.map(mapIncident);
+}
+
+export async function getIncidentApi(
+  incidentId: string,
+  signal?: AbortSignal,
+): Promise<PersistedIncident> {
+  const row = await apiGet<IncidentApiItem>(`/api/incidents/${incidentId}`, signal);
+  return mapIncident(row);
+}
+
+export async function listIncidentAuditLogs(
+  incidentId: string,
+  signal?: AbortSignal,
+): Promise<AuditLogEntry[]> {
+  const payload = await apiGet<AuditLogListApi>(
+    `/api/incidents/${incidentId}/audit-logs`,
+    signal,
+  );
+  return payload.items.map(mapAuditLog);
+}
+
+export async function approveAction(
+  actionId: string,
+  signal?: AbortSignal,
+): Promise<ActionDecisionApi> {
+  return apiPost<ActionDecisionApi>(`/api/actions/${actionId}/approve`, signal);
+}
+
+export async function rejectAction(
+  actionId: string,
+  signal?: AbortSignal,
+): Promise<ActionDecisionApi> {
+  return apiPost<ActionDecisionApi>(`/api/actions/${actionId}/reject`, signal);
+}
+
+export type DownloadedReport = {
+  blob: Blob;
+  filename: string;
+  contentType: string;
+};
+
+export async function downloadIncidentReport(
+  incidentId: string,
+  signal?: AbortSignal,
+): Promise<DownloadedReport> {
+  let response: Response;
+  try {
+    response = await fetch(apiUrl(`/api/incidents/${incidentId}/report`), {
+      method: "GET",
+      headers: { Accept: "text/html" },
+      signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw error;
+    }
+    throw new ApiError("Unable to reach the API", 0, "network_error");
+  }
+
+  if (!response.ok) {
+    const body = await parseJson(response);
+    const errorBody = (body ?? {}) as ErrorBody;
+    throw new ApiError(
+      errorBody.detail ?? `Request failed with status ${response.status}`,
+      response.status,
+      errorBody.code ?? "http_error",
+    );
+  }
+
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!isHtmlContentType(contentType)) {
+    throw new ApiError(
+      "Report response was not HTML",
+      response.status,
+      "unexpected_content_type",
+    );
+  }
+
+  const blob = await response.blob();
+  return {
+    blob,
+    filename: safeReportFilename(response.headers.get("content-disposition"), incidentId),
+    contentType,
+  };
+}
+

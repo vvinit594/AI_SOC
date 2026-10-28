@@ -1,6 +1,6 @@
 # AI-SOC — MVP Specification (v1)
 
-**Status:** Phase 8C (downloadable HTML incident reports) complete. Phase 8D frontend integration is not started. Scope remains frozen.
+**Status:** Phase 8D (Response Center and Reports frontend integration) complete. Phase 9 testing and hardening is not started. Scope remains frozen.
 **Product:** AI-SOC — Autonomous Threat Investigation & Response Platform  
 **One-line definition:** A deployable Agentic AI platform that ingests security events, detects suspicious activity with transparent rules, coordinates specialized LangGraph agents to investigate, enriches indicators with real threat intelligence, explains the probable attack with evidence, and recommends a safe, human-approved response through a live SOC dashboard.
 
@@ -30,8 +30,8 @@
 | 5 | Threat-intelligence lookup (real API, bounded tool) | Result stored with source, timestamp, status; API failure → `unavailable`, never fabricated |
 | 6 | Transparent severity + MITRE ATT&CK mapping | Every severity and technique has a listed reason tied to event IDs |
 | 7 | Root-cause analysis | Evidence-backed explanation that states what is uncertain |
-| 8 | Response recommendations + approval/rejection | Actions are **simulated only**, labelled as such; decisions recorded with actor + timestamp + audit event. **Done for persistence/API; frontend wiring is Phase 8D.** |
-| 9 | Incident report (downloadable HTML or PDF) | Generated from persisted structured data; includes all sections in §6. **Done for HTML download via `GET /api/incidents/{id}/report`. Frontend wiring is Phase 8D.** |
+| 8 | Response recommendations + approval/rejection | Actions are **simulated only**, labelled as such; decisions recorded with actor + timestamp + audit event. **Done for persistence/API and Response Center UI.** Dashboard metrics still use mock data. |
+| 9 | Incident report (downloadable HTML or PDF) | Generated from persisted structured data; includes all sections in §6. **Done for HTML download via `GET /api/incidents/{id}/report` and the Reports UI.** |
 | 10 | SOC dashboard | All counters/charts read from PostgreSQL, never hardcoded |
 | 11 | Deployment with persistent storage | Public URL completes the full demo loop without the developer's machine running |
 
@@ -73,7 +73,9 @@ Phase 8A implements approve/reject. `GET /api/incidents/{id}` returns persisted 
 
 Phase 8B persists append-only `audit_logs` rows in the same transaction as a successful approve/reject. Idempotent repeats and 409/404 responses do not write a new success audit event. The table does not uniquely constrain `(resource, event_type)`; repeated lifecycle events of the same type are allowed. Decision idempotency is enforced by the response-action state machine. `details` is allowlisted per event type. `GET /api/incidents/{id}/audit-logs` returns that history (newest first, bounded pagination) under the same `ANALYST_API_TOKEN` policy as approve/reject. Application services never update or delete audit rows. Direct database access can still alter records; this is not tamper-proof WORM storage. Retention is a future operational decision.
 
-Phase 8C generates a self-contained HTML report from persisted incident, event, investigation, response-action, and audit-log rows. `GET /api/incidents/{id}/report` requires the same `ANALYST_API_TOKEN` policy as approve/reject and audit-log reads. The response is `text/html; charset=utf-8` with `Content-Disposition: attachment; filename="incident-{id}-report.html"`. Unknown incidents return HTTP 404. Untrusted values are HTML-escaped; the document contains no scripts and is readable offline. Missing optional fields render as empty-state copy. Recommended actions with `execution_status=not_executed` (the v1 case) are labelled as not performed / simulated; the report never describes them as executed. No new report table or migration is used. Frontend download UI remains Phase 8D.
+Phase 8C generates a self-contained HTML report from persisted incident, event, investigation, response-action, and audit-log rows. `GET /api/incidents/{id}/report` requires the same `ANALYST_API_TOKEN` policy as approve/reject and audit-log reads. The response is `text/html; charset=utf-8` with `Content-Disposition: attachment; filename="incident-{id}-report.html"`. Unknown incidents return HTTP 404. Untrusted values are HTML-escaped; the document contains no scripts and is readable offline. Missing optional fields render as empty-state copy. Recommended actions with `execution_status=not_executed` (the v1 case) are labelled as not performed / simulated; the report never describes them as executed. No new report table or migration is used.
+
+Phase 8D wires the Response Center, incident-detail response panel, and Reports page to those persisted APIs. Approve/reject, audit history, and HTML download are live client fetches against FastAPI. The browser does **not** send `ANALYST_API_TOKEN` and must not receive it via `NEXT_PUBLIC_*`. Development/test with an empty backend token records actor `unverified`. If a token is configured, the UI surfaces HTTP 401; production without a token surfaces HTTP 403. Per-user login is still deferred. CORS exposes `Content-Disposition` so the download can keep the server filename. Overview, event explorer, and incident narrative sections remain on mock data until a later wiring phase.
 
 ### Frontend pages
 `/` SOC Overview · `/events` Event Explorer · `/incidents` + `/incidents/[id]` Incident Detail · `/investigations/[id]` Investigation Workspace · `/response` Response Center · `/reports` Reports & History

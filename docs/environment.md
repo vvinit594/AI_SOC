@@ -97,6 +97,10 @@ Phase 8B audit rows are append-only in application code. A database administrato
 | `NEXT_PUBLIC_API_BASE_URL` | yes | `http://localhost:8000` | no | Base URL of the FastAPI backend. In production, the deployed API URL (HTTPS). Redeploy after changing. |
 | `NEXT_PUBLIC_APP_NAME` | no | `AI-SOC` | no | Display name in the UI header. |
 
+Phase 8D Response Center, audit history, and report download call FastAPI from the browser using `NEXT_PUBLIC_API_BASE_URL`. They do **not** send `Authorization`. There is no `NEXT_PUBLIC_ANALYST_API_TOKEN` and one must never be added — that would bundle a secret into client JavaScript.
+
+Supported UI path: backend `ANALYST_API_TOKEN` empty in development/test, so approve/reject/audit/report succeed as actor `unverified`. If the backend token is set, those requests return 401 and the UI shows that error. Production with an empty token returns 403. Browser session login is not in v1.
+
 ---
 
 ## Local PostgreSQL via Docker Compose (Phase 4 / 10)

@@ -2,7 +2,7 @@
 
 An Agentic AI Security Operations Center (SOC) that ingests security logs, detects suspicious activity with transparent rules, coordinates specialized LangGraph agents to investigate incidents, enriches indicators with real threat intelligence, maps behaviour to MITRE ATT&CK, and recommends a safe, human-approved response — all through a live security dashboard.
 
-> **Status:** Phase 8C (downloadable HTML incident reports) complete. Phase 8D frontend integration has not started. See [`docs/MVP_SPEC.md`](docs/MVP_SPEC.md) for the frozen v1 scope.
+> **Status:** Phase 8D (Response Center and Reports frontend integration) complete. Phase 9 testing and hardening has not started. See [`docs/MVP_SPEC.md`](docs/MVP_SPEC.md) for the frozen v1 scope.
 
 ---
 
@@ -164,7 +164,7 @@ docker compose up --build
 | 5 | Log ingestion & threat detection | ✅ Done |
 | 6 | Agentic AI workflow (LangGraph) | ✅ Done |
 | 7 | Live investigation progress (SSE) | ✅ Done |
-| 8 | Response center & incident reports | ⏳ |
+| 8 | Response center & incident reports | ✅ Done |
 | 9 | Testing & security hardening | ⏳ |
 | 10 | Dockerize | ⏳ |
 | 11 | Deploy & go live | ⏳ |

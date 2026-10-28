@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { IncidentLiveResponse } from "@/components/incidents/incident-live-response";
 import { SeverityBadge } from "@/components/incidents/severity-badge";
 import { StatusBadge } from "@/components/incidents/status-badge";
 import { PageHeader } from "@/components/layout/page-header";
@@ -8,12 +9,7 @@ import { MockBanner } from "@/components/shared/mock-banner";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import {
-  getActionsForIncident,
-  getEventsForIncident,
-  getIncident,
-  listIncidents,
-} from "@/lib/data";
+import { getEventsForIncident, getIncident, listIncidents } from "@/lib/data";
 import { formatUtc, shortId } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -37,7 +33,6 @@ export default async function IncidentDetailPage({
   }
 
   const events = getEventsForIncident(incident);
-  const actions = getActionsForIncident(incident.id);
 
   return (
     <div>
@@ -54,8 +49,8 @@ export default async function IncidentDetailPage({
         }
       />
       <MockBanner>
-        Incident detail is populated from mock data. Severity reasons already show the
-        evidence contract the detection engine will persist in Phase 5.
+        Severity, events, and root-cause on this page still use mock data. Response
+        recommendations, audit history, and HTML report download read the backend.
       </MockBanner>
       <div className="mb-6 flex flex-wrap items-center gap-2">
         <SeverityBadge severity={incident.severity} />
@@ -131,31 +126,9 @@ export default async function IncidentDetailPage({
             ))}
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Proposed response</CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-2">
-            {actions.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No containment actions were proposed for this incident.
-              </p>
-            ) : (
-              actions.map((action) => (
-                <p key={action.id} className="text-sm">
-                  <span className="capitalize">
-                    {action.actionType.replaceAll("_", " ")}
-                  </span>{" "}
-                  → {action.target}{" "}
-                  <span className="text-muted-foreground">(simulated)</span>
-                </p>
-              ))
-            )}
-            <Link href="/response" className="text-sm text-primary hover:underline">
-              Open response center
-            </Link>
-          </CardContent>
-        </Card>
+      </div>
+      <div className="mt-6">
+        <IncidentLiveResponse incidentId={incident.id} />
       </div>
     </div>
   );

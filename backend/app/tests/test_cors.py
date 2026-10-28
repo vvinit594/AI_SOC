@@ -32,6 +32,13 @@ def test_disallowed_origin_is_not_reflected(client: TestClient) -> None:
     assert response.headers.get("access-control-allow-origin") != DISALLOWED_ORIGIN
 
 
+def test_content_disposition_is_exposed_to_the_browser(client: TestClient) -> None:
+    response = client.get("/health", headers={"Origin": ALLOWED_ORIGIN})
+    assert response.status_code == 200
+    exposed = response.headers.get("access-control-expose-headers", "")
+    assert "content-disposition" in exposed.lower()
+
+
 def test_wildcard_cors_is_rejected_at_construction() -> None:
     with pytest.raises(ValidationError) as exc_info:
         Settings(_env_file=None, cors_allowed_origins="*")
