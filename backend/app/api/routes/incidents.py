@@ -2,6 +2,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from app.core.auth import AnalystAuthError, resolve_actor
@@ -18,6 +19,7 @@ from app.services import incidents as incident_service
 from app.services.audit import AuditError, list_incident_audit_logs
 from app.services.detection import detect_incidents
 from app.services.investigations import InvestigationError, start_investigation
+from app.services.reports import ReportError, build_incident_report, content_disposition
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
 
@@ -112,6 +114,34 @@ def get_incident_audit_logs(
     return AuditLogListResponse(
         items=[AuditLogRead.model_validate(item) for item in items],
         total=total,
+    )
+
+
+@router.get(
+    "/{incident_id}/report",
+    response_class=HTMLResponse,
+    summary="Download a self-contained HTML incident report",
+)
+def download_incident_report(
+    incident_id: uuid.UUID,
+    session: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    authorization: Annotated[str | None, Header()] = None,
+) -> HTMLResponse:
+    try:
+        resolve_actor(settings, authorization)
+        html_doc, filename = build_incident_report(session, incident_id)
+    except AnalystAuthError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except ReportError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return HTMLResponse(
+        content=html_doc,
+        headers={
+            "Content-Disposition": content_disposition(filename),
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "no-store",
+        },
     )
 
 

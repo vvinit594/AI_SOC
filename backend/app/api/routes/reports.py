@@ -1,4 +1,4 @@
-"""Incident report routes. Implemented in Phase 8."""
+"""Collection routes for reports. Incident download is GET /api/incidents/{id}/report."""
 
 from fastapi import APIRouter
 

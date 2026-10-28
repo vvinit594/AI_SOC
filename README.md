@@ -2,7 +2,7 @@
 
 An Agentic AI Security Operations Center (SOC) that ingests security logs, detects suspicious activity with transparent rules, coordinates specialized LangGraph agents to investigate incidents, enriches indicators with real threat intelligence, maps behaviour to MITRE ATT&CK, and recommends a safe, human-approved response — all through a live security dashboard.
 
-> **Status:** Phase 8B (persistent audit-log history) complete. Phase 8C reports and 8D frontend integration have not started. See [`docs/MVP_SPEC.md`](docs/MVP_SPEC.md) for the frozen v1 scope.
+> **Status:** Phase 8C (downloadable HTML incident reports) complete. Phase 8D frontend integration has not started. See [`docs/MVP_SPEC.md`](docs/MVP_SPEC.md) for the frozen v1 scope.
 
 ---
 

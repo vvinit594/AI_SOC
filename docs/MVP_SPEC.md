@@ -1,6 +1,6 @@
 # AI-SOC — MVP Specification (v1)
 
-**Status:** Phase 8B (persistent audit-log history) complete. Phase 8C downloadable reports and 8D frontend integration are not started. Scope remains frozen.
+**Status:** Phase 8C (downloadable HTML incident reports) complete. Phase 8D frontend integration is not started. Scope remains frozen.
 **Product:** AI-SOC — Autonomous Threat Investigation & Response Platform  
 **One-line definition:** A deployable Agentic AI platform that ingests security events, detects suspicious activity with transparent rules, coordinates specialized LangGraph agents to investigate, enriches indicators with real threat intelligence, explains the probable attack with evidence, and recommends a safe, human-approved response through a live SOC dashboard.
 
@@ -31,7 +31,7 @@
 | 6 | Transparent severity + MITRE ATT&CK mapping | Every severity and technique has a listed reason tied to event IDs |
 | 7 | Root-cause analysis | Evidence-backed explanation that states what is uncertain |
 | 8 | Response recommendations + approval/rejection | Actions are **simulated only**, labelled as such; decisions recorded with actor + timestamp + audit event. **Done for persistence/API; frontend wiring is Phase 8D.** |
-| 9 | Incident report (downloadable HTML or PDF) | Generated from persisted structured data; includes all sections in §6 |
+| 9 | Incident report (downloadable HTML or PDF) | Generated from persisted structured data; includes all sections in §6. **Done for HTML download via `GET /api/incidents/{id}/report`. Frontend wiring is Phase 8D.** |
 | 10 | SOC dashboard | All counters/charts read from PostgreSQL, never hardcoded |
 | 11 | Deployment with persistent storage | Public URL completes the full demo loop without the developer's machine running |
 
@@ -71,7 +71,9 @@ Unrestricted automatic blocking or account disabling · live enterprise endpoint
 
 Phase 8A implements approve/reject. `GET /api/incidents/{id}` returns persisted `response_actions`. Decisions are simulated (`simulated=true`, `execution_status=not_executed`); no containment is invoked. Repeating the same decision is idempotent; the opposite decision is HTTP 409. Incident status stays `awaiting_approval` when individual actions are decided so one decision cannot imply that every recommendation was decided.
 
-Phase 8B persists append-only `audit_logs` rows in the same transaction as a successful approve/reject. Idempotent repeats and 409/404 responses do not write a new success audit event. The table does not uniquely constrain `(resource, event_type)`; repeated lifecycle events of the same type are allowed. Decision idempotency is enforced by the response-action state machine. `details` is allowlisted per event type. `GET /api/incidents/{id}/audit-logs` returns that history (newest first, bounded pagination) under the same `ANALYST_API_TOKEN` policy as approve/reject. Application services never update or delete audit rows. Direct database access can still alter records; this is not tamper-proof WORM storage. Retention is a future operational decision. `GET /api/incidents/{id}/report` is not implemented yet.
+Phase 8B persists append-only `audit_logs` rows in the same transaction as a successful approve/reject. Idempotent repeats and 409/404 responses do not write a new success audit event. The table does not uniquely constrain `(resource, event_type)`; repeated lifecycle events of the same type are allowed. Decision idempotency is enforced by the response-action state machine. `details` is allowlisted per event type. `GET /api/incidents/{id}/audit-logs` returns that history (newest first, bounded pagination) under the same `ANALYST_API_TOKEN` policy as approve/reject. Application services never update or delete audit rows. Direct database access can still alter records; this is not tamper-proof WORM storage. Retention is a future operational decision.
+
+Phase 8C generates a self-contained HTML report from persisted incident, event, investigation, response-action, and audit-log rows. `GET /api/incidents/{id}/report` requires the same `ANALYST_API_TOKEN` policy as approve/reject and audit-log reads. The response is `text/html; charset=utf-8` with `Content-Disposition: attachment; filename="incident-{id}-report.html"`. Unknown incidents return HTTP 404. Untrusted values are HTML-escaped; the document contains no scripts and is readable offline. Missing optional fields render as empty-state copy. Recommended actions with `execution_status=not_executed` (the v1 case) are labelled as not performed / simulated; the report never describes them as executed. No new report table or migration is used. Frontend download UI remains Phase 8D.
 
 ### Frontend pages
 `/` SOC Overview · `/events` Event Explorer · `/incidents` + `/incidents/[id]` Incident Detail · `/investigations/[id]` Investigation Workspace · `/response` Response Center · `/reports` Reports & History
@@ -105,7 +107,7 @@ Incident summary & severity · event evidence (with IDs) · investigation timeli
 
 ---
 
-## 8. Acceptance criteria — Definition of Done (8/16; Phase 6 items checked)
+## 8. Acceptance criteria — Definition of Done (9/16; Phase 8C report download checked)
 
 **Core functionality**
 - [x] Loads built-in scenarios and accepts JSON/CSV uploads with size/type limits.
@@ -122,7 +124,7 @@ Incident summary & severity · event evidence (with IDs) · investigation timeli
 **Response & reporting**
 - [x] A reasoned response recommendation is produced.
 - [x] Approve/reject is recorded with actor + timestamp; simulated vs real is unambiguous.
-- [ ] A downloadable report with findings and timeline is generated.
+- [x] A downloadable report with findings and timeline is generated.
 - [x] Incidents, agent runs, and audit history survive page refresh and restart.
 
 **Deployment & demo**
@@ -142,4 +144,4 @@ One phase at a time; each phase is reviewed, tested, and committed by the projec
 2. **Threat-intel provider** — decided in Phase 6: `THREAT_INTEL_PROVIDER=none` by default; optional `abuseipdb`. Failures and documentation IPs are `unavailable`, never fabricated as malicious.
 3. **Backend host** for FastAPI (needs long-running requests + SSE): Render, Railway, Fly.io, etc.
 4. **Authentication for approval endpoints** — decided in Phase 8A: shared `ANALYST_API_TOKEN` bearer token. A valid token records actor `analyst` (generic, not a person). Development/test with an empty token allow decisions as `unverified`. Production with an empty token returns HTTP 403. Missing/invalid bearer when a token is configured returns HTTP 401. Per-user login is deferred.
-5. **Report format**: HTML (simplest, no extra deps) vs PDF.
+5. **Report format** — decided in Phase 8C: self-contained HTML (no extra dependencies). PDF is not generated.
