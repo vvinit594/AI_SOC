@@ -2,7 +2,7 @@
 
 An Agentic AI Security Operations Center (SOC) that ingests security logs, detects suspicious activity with transparent rules, coordinates specialized LangGraph agents to investigate incidents, enriches indicators with real threat intelligence, maps behaviour to MITRE ATT&CK, and recommends a safe, human-approved response — all through a live security dashboard.
 
-> **Status:** Phase 9 (testing, security hardening, and integration verification) implemented. Phase 10 Dockerization has not started. See [`docs/MVP_SPEC.md`](docs/MVP_SPEC.md) for the frozen v1 scope.
+> **Status:** Phase 10 (local Docker Compose stack) implemented. Phase 11 public deployment has not started. See [`docs/MVP_SPEC.md`](docs/MVP_SPEC.md) for the frozen v1 scope.
 
 ---
 
@@ -59,7 +59,7 @@ ai-soc/
 ├── docs/              # Specification, environment variables, design notes
 │   ├── MVP_SPEC.md
 │   └── environment.md
-├── docker-compose.yml # Local PostgreSQL (full stack in Phase 10)
+├── docker-compose.yml # Frontend, backend, Postgres, and one-shot migrations
 ├── .gitignore
 └── README.md
 ```
@@ -94,7 +94,56 @@ cp frontend/.env.example frontend/.env.local
 
 The full list of variables and their purpose is documented in [`docs/environment.md`](docs/environment.md).
 
-### Running locally
+### One-command local stack (Phase 10)
+
+From a clean checkout, with Docker Desktop running:
+
+```bash
+cp .env.example .env          # optional; defaults match local development
+docker compose up --build
+```
+
+| Service | URL |
+|---------|-----|
+| Frontend | [http://localhost:3000](http://localhost:3000) |
+| Backend health | [http://localhost:8000/health](http://localhost:8000/health) |
+| Backend docs | [http://localhost:8000/docs](http://localhost:8000/docs) (`APP_ENV=development`) |
+
+Postgres is bound to `127.0.0.1` only. Containers use the Compose hostname `postgres`. The browser must use `http://localhost:8000`, never `http://backend:8000`.
+
+Optional demo seed (not run automatically):
+
+```bash
+docker compose exec backend python -m app.db.seed
+```
+
+Inspect logs and health:
+
+```bash
+docker compose ps
+docker compose logs --tail=200
+curl http://localhost:8000/health
+```
+
+Migrations run once via the `migrate` service (`alembic upgrade head`) before the API starts. Check the version from the backend container:
+
+```bash
+docker compose exec backend alembic current
+```
+
+Stop without deleting data:
+
+```bash
+docker compose down
+```
+
+**Do not** run `docker compose down -v` unless you intend to destroy the named volume (`aisoc_pgdata`) and every stored event, incident, and audit row. To inspect the volume name: `docker volume ls`. A destructive reset is `docker compose down` followed by removing that volume — never do this to preserve demo data.
+
+If host port `5432` is already taken (common on Windows), copy `docker-compose.override.example.yml` to `docker-compose.override.yml` and set host `DATABASE_URL` to port `55432`. See [`docs/environment.md`](docs/environment.md).
+
+The Compose frontend image runs production Next.js (`NODE_ENV=production`), so `/api/analyst` stays disabled. Public incident reads still go to `http://localhost:8000`. Direct FastAPI approve/reject works in development with an empty `ANALYST_API_TOKEN` (actor `unverified`). That is not a login session.
+
+### Host-run frontend and backend
 
 **Frontend (Phase 2)**
 
@@ -158,12 +207,6 @@ There is no Playwright suite in this repository. Browser verification of the Res
 
 Protected analyst UI calls go through same-origin `/api/analyst` in development/test. The browser never receives `ANALYST_API_TOKEN`. Production disables that proxy because there is no login session.
 
-The final target is a single command:
-
-```bash
-docker compose up --build
-```
-
 ## Development roadmap
 
 | Phase | Focus | Status |
@@ -178,7 +221,7 @@ docker compose up --build
 | 7 | Live investigation progress (SSE) | ✅ Done |
 | 8 | Response center & incident reports | ✅ Done |
 | 9 | Testing & security hardening | ✅ Done |
-| 10 | Dockerize | ⏳ |
+| 10 | Dockerize | ✅ Done |
 | 11 | Deploy & go live | ⏳ |
 | 12 | Final demo preparation | ⏳ |
 
@@ -199,6 +242,7 @@ All sample data is synthetic and uses RFC 5737 documentation IP ranges.
 - Failed threat-intel lookups are reported as *unavailable*, never fabricated.
 - LLM confidence is a qualitative label, not a calibrated probability.
 - Not built yet: live log streaming, SIEM/EDR integrations, AI SOC assistant, custom-trained models.
+- The Docker frontend is a production Next.js server, so `/api/analyst` remains disabled until real login exists.
 
 ## License
 

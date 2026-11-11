@@ -1,0 +1,9 @@
+# Copy to docker-compose.override.yml (gitignored) when host port 5432 is already bound
+# (common on Windows with a local PostgreSQL service). Then set host DATABASE_URL to
+# postgresql+psycopg://aisoc:aisoc@localhost:55432/aisoc for tools running on the host.
+# Containers still talk to postgres:5432 on the Compose network.
+
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:55432:5432"

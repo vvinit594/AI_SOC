@@ -119,18 +119,30 @@ Local development: leave both backend and Next.js `ANALYST_API_TOKEN` empty so d
 
 ---
 
-## Local PostgreSQL via Docker Compose (Phase 4 / 10)
+## Docker Compose (Phase 10)
 
-Compose publishes Postgres on host port `5432`. If that port is already bound (common on Windows when `postgresql-x64-18` is installed), the API will fail with password authentication errors because it is talking to the wrong server. Leave the committed Compose service unchanged and use a gitignored override port plus a matching local `DATABASE_URL`.
-
-On a host where both Windows PostgreSQL and Docker publish `5432`, `localhost:5432` on IPv4 typically reaches the Windows service. Point `DATABASE_URL` at the Compose override port (for example `55432`) and run Alembic from `backend/` so it loads `backend/.env`.
+Root `.env.example` (copy to `.env`) supplies Compose substitution variables. Those credentials are **local development only**.
 
 | Variable | Default | Secret | Description |
 |----------|---------|--------|-------------|
 | `POSTGRES_USER` | `aisoc` | **yes** | Database user created by the Postgres container. |
-| `POSTGRES_PASSWORD` | `aisoc` | **yes** | Local-only development password. Use a strong value in any shared environment. |
+| `POSTGRES_PASSWORD` | `aisoc` | **yes** | Local-only development password. |
 | `POSTGRES_DB` | `aisoc` | no | Database name. **Never point pytest at this live database.** |
-| `POSTGRES_PORT` | `5432` | no | Host port mapped to the container. |
+| `POSTGRES_PORT` | `5432` | no | Host port published at `127.0.0.1` only. Inside Compose, services always use `postgres:5432`. |
+| `NEXT_PUBLIC_API_BASE_URL` | `http://localhost:8000` | no | Baked into the frontend image at **build** time. Must be a host URL the browser can open. Never `http://backend:8000`. |
+| `API_UPSTREAM_URL` | `http://backend:8000` (Compose) | no | Set on the frontend **container** for server-side fetches. Production Next.js still disables `/api/analyst`. |
+
+Inside Compose, the backend `DATABASE_URL` host is `postgres`, not `localhost`. A host-run uvicorn process still uses `backend/.env` (`localhost` + `POSTGRES_PORT`).
+
+If host port `5432` is already bound (common on Windows when `postgresql-x64-18` is installed), host tools talking to `localhost:5432` hit the wrong server and fail with password authentication errors. Copy `docker-compose.override.example.yml` to gitignored `docker-compose.override.yml` (host `55432`) and point host `DATABASE_URL` at that port. Do not drop the `aisoc_pgdata` volume.
+
+The `migrate` service runs `alembic upgrade head` once per `docker compose up` and then exits. It does not seed demo data. Seed opt-in: `docker compose exec backend python -m app.db.seed`.
+
+`GET /health` returns HTTP 200 only when the database answers `SELECT 1`. HTTP 503 means the API process is up but PostgreSQL is not.
+
+## Local PostgreSQL tests
+
+On a host where both Windows PostgreSQL and Docker publish `5432`, `localhost:5432` on IPv4 typically reaches the Windows service. Point host `DATABASE_URL` at the Compose override port (for example `55432`) and run Alembic from `backend/` so it loads `backend/.env`.
 
 PostgreSQL integration tests (`backend/app/tests/test_phase5_postgres.py`, `test_phase9_postgres.py`) create throwaway databases `aisoc_phase5_verify` and `aisoc_phase9_verify` on a local cluster. Phase 9 validates `AISOC_POSTGRES_TEST_URL` before any create/drop: it must be PostgreSQL, a local host, and the dedicated name `aisoc_phase9_verify`. Live `aisoc`, `postgres`, remote hosts, and other database names are refused (tests skip). Cleanup warns if the throwaway database cannot be dropped. Credentials are never logged.
 

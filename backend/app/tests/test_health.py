@@ -23,6 +23,19 @@ def test_health_uses_injected_settings() -> None:
     assert body["environment"] == "development"
 
 
+def test_health_returns_503_when_database_is_unavailable(client: TestClient) -> None:
+    class UnavailableEngine:
+        def connect(self) -> None:
+            raise RuntimeError("database is down")
+
+    client.app.state.engine = UnavailableEngine()
+    response = client.get("/health")
+    assert response.status_code == 503
+    body = response.json()
+    assert body["detail"] == "Database unavailable"
+    assert "postgresql" not in response.text.lower()
+
+
 def test_unknown_route_returns_json_error(client: TestClient) -> None:
     response = client.get("/does-not-exist")
     assert response.status_code == 404

@@ -1,21 +1,104 @@
-# Local PostgreSQL for Phase 4 development.
-# The full application stack is containerized in Phase 10.
+# Local development stack for Phase 10.
+# Default database credentials are for local development only. Never use them in production.
+# Copy .env.example to .env in this directory to override substitution variables.
+# Do not run `docker compose down -v` unless you intend to delete the database volume.
+
 services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: aisoc
-      POSTGRES_PASSWORD: aisoc
-      POSTGRES_DB: aisoc
+      POSTGRES_USER: ${POSTGRES_USER:-aisoc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aisoc}
+      POSTGRES_DB: ${POSTGRES_DB:-aisoc}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - aisoc_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U aisoc -d aisoc"]
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment: &backend-env
+      APP_ENV: ${APP_ENV:-development}
+      APP_NAME: ${APP_NAME:-AI-SOC API}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-aisoc}:${POSTGRES_PASSWORD:-aisoc}@postgres:5432/${POSTGRES_DB:-aisoc}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
+      ANALYST_API_TOKEN: ${ANALYST_API_TOKEN:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-none}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      THREAT_INTEL_PROVIDER: ${THREAT_INTEL_PROVIDER:-none}
+      THREAT_INTEL_API_KEY: ${THREAT_INTEL_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      <<: *backend-env
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 20s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
+        NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-AI-SOC}
+    environment:
+      # Server-side only. The browser uses NEXT_PUBLIC_API_BASE_URL (localhost), never "backend".
+      API_UPSTREAM_URL: http://backend:8000
+      # Production Next.js keeps /api/analyst disabled until real login exists.
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 20s
+    restart: unless-stopped
 
 volumes:
   aisoc_pgdata:

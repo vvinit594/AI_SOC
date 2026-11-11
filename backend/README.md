@@ -2,7 +2,7 @@
 
 FastAPI application for log processing, detection, and agent orchestration. The Next.js frontend is a separate package.
 
-Phase 3 implements the process shell: configuration, logging, CORS, routing, and `GET /health`. Phase 4 adds PostgreSQL via SQLAlchemy, typed event/incident schemas, Alembic migrations, and read APIs for events and incidents. Phase 5 adds JSON/CSV upload, demo scenario loaders, and deterministic R1/R2/R3 detection with incident correlation. Phase 6 runs a four-node LangGraph investigation (`POST /api/incidents/{id}/investigate`) and persists each node in `agent_runs`. Phase 7 streams live progress on `GET /api/investigations/{id}/stream` from persisted `agent_runs` (replay + follow). Phase 8A persists response-action decisions and exposes `POST /api/actions/{id}/approve` and `/reject` (simulated only). Phase 8B records those decisions in append-only `audit_logs` and exposes `GET /api/incidents/{id}/audit-logs`. Phase 8C adds `GET /api/incidents/{id}/report` (self-contained HTML download). Phase 9 adds regression tests, CORS coverage on protected routes, report audit-limit truncation, and PostgreSQL persistence tests against throwaway `aisoc_phase9_verify`.
+Phase 3 implements the process shell: configuration, logging, CORS, routing, and `GET /health`. Phase 4 adds PostgreSQL via SQLAlchemy, typed event/incident schemas, Alembic migrations, and read APIs for events and incidents. Phase 5 adds JSON/CSV upload, demo scenario loaders, and deterministic R1/R2/R3 detection with incident correlation. Phase 6 runs a four-node LangGraph investigation (`POST /api/incidents/{id}/investigate`) and persists each node in `agent_runs`. Phase 7 streams live progress on `GET /api/investigations/{id}/stream` from persisted `agent_runs` (replay + follow). Phase 8A persists response-action decisions and exposes `POST /api/actions/{id}/approve` and `/reject` (simulated only). Phase 8B records those decisions in append-only `audit_logs` and exposes `GET /api/incidents/{id}/audit-logs`. Phase 8C adds `GET /api/incidents/{id}/report` (self-contained HTML download). Phase 9 adds regression tests, CORS coverage on protected routes, report audit-limit truncation, and PostgreSQL persistence tests against throwaway `aisoc_phase9_verify`. Phase 10 runs this API in Docker Compose with a one-shot `alembic upgrade head` service.
 
 ## Setup
 
@@ -30,6 +30,8 @@ pip install -r requirements-dev.txt
 Local PostgreSQL is defined at the repo root:
 
 ```bash
+docker compose up --build
+# or, host-run API against Compose Postgres only:
 docker compose up -d postgres
 ```
 

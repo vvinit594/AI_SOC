@@ -30,7 +30,9 @@ See `../docs/environment.md`. `NEXT_PUBLIC_*` values are bundled into the browse
 | `ANALYST_API_TOKEN` | empty | **Server-only.** Injected by `/api/analyst`. Never `NEXT_PUBLIC_`. |
 | `API_UPSTREAM_URL` | `NEXT_PUBLIC_API_BASE_URL` | **Server-only** FastAPI origin for the analyst proxy |
 
-`/api/analyst` is disabled when `NODE_ENV=production` because there is no login session. That shared-token proxy is not per-user authentication.
+`/api/analyst` is disabled when `NODE_ENV=production` because there is no login session. That shared-token proxy is not per-user authentication. The Compose frontend image is a production Next.js server, so the restriction still applies inside Docker.
+
+`NEXT_PUBLIC_API_BASE_URL` must remain a browser-reachable host URL (`http://localhost:8000`). Compose sets `API_UPSTREAM_URL=http://backend:8000` only on the server.
 
 ## Data
 
