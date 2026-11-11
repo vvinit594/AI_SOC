@@ -11,7 +11,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aisoc}
       POSTGRES_DB: ${POSTGRES_DB:-aisoc}
     ports:
-      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:56000:5432"
     volumes:
       - aisoc_pgdata:/var/lib/postgresql/data
     healthcheck:
