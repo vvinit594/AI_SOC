@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { Suspense } from "react";
 
-import { AppShell } from "@/components/layout/app-shell";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { APP_NAME } from "@/lib/constants";
 
@@ -27,18 +25,6 @@ export const metadata: Metadata = {
     "Agentic AI platform for ingesting security events, investigating incidents, and recommending a human-approved response.",
 };
 
-function ShellFallback() {
-  return (
-    <div className="flex min-h-full">
-      <div className="hidden w-64 border-r border-border bg-sidebar lg:block" />
-      <div className="flex-1">
-        <div className="h-14 border-b border-border" />
-        <div className="p-6 text-sm text-muted-foreground">Loading workspace…</div>
-      </div>
-    </div>
-  );
-}
-
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
@@ -52,11 +38,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         >
           Skip to content
         </a>
-        <TooltipProvider>
-          <Suspense fallback={<ShellFallback />}>
-            <AppShell>{children}</AppShell>
-          </Suspense>
-        </TooltipProvider>
+        <TooltipProvider>{children}</TooltipProvider>
       </body>
     </html>
   );

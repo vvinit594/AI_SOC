@@ -9,14 +9,16 @@ from fastapi.testclient import TestClient
 from app.db.base import Base
 from app.db.demo_data import BRUTE_SUCCESS_ID, demo_events
 from app.main import create_app
-from app.tests.helpers import build_settings
+from app.tests.helpers import CookieClient, build_settings, register_user
 
 
 def _client_with_settings(**overrides: object) -> TestClient:
     settings = build_settings(**overrides)
     application = create_app(settings)
     Base.metadata.create_all(application.state.engine)
-    return TestClient(application)
+    client = CookieClient(application)
+    register_user(client)
+    return client
 
 
 VALID_EVENT = {
@@ -200,10 +202,13 @@ def test_load_scenario_persist_failure_returns_safe_500(
         raise SQLAlchemyError('password authentication failed for user "aisoc"')
 
     monkeypatch.setattr(ingestion_service.event_service, "upsert_events", boom)
+    from app.tests.helpers import CookieClient, register_user
+
     with (
         caplog.at_level(logging.ERROR),
-        TestClient(application, raise_server_exceptions=False) as test_client,
+        CookieClient(application, raise_server_exceptions=False) as test_client,
     ):
+        register_user(test_client)
         response = test_client.post("/api/scenarios/A/load")
         listed = test_client.get("/api/events").json()
     assert response.status_code == 500

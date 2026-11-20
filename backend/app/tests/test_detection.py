@@ -107,7 +107,10 @@ def test_r1_respects_time_window() -> None:
 
     application = create_app(settings)
     Base.metadata.create_all(application.state.engine)
-    with TestClient(application) as client:
+    from app.tests.helpers import CookieClient, register_user
+
+    with CookieClient(application) as client:
+        register_user(client)
         _upload_events(client, [_failure(minute) for minute in (0, 2, 4, 6, 8)])
         body = client.post("/api/incidents/detect").json()
         assert body["created"] == 0
@@ -120,7 +123,10 @@ def test_r1_threshold_is_configurable() -> None:
     settings = build_settings(rule_auth_failure_threshold=6)
     application = create_app(settings)
     Base.metadata.create_all(application.state.engine)
-    with TestClient(application) as client:
+    from app.tests.helpers import CookieClient, register_user
+
+    with CookieClient(application) as client:
+        register_user(client)
         _upload_events(client, [_failure(minute) for minute in range(5)])
         body = client.post("/api/incidents/detect").json()
         assert body["created"] == 0
@@ -368,13 +374,19 @@ def test_concurrent_detect_creates_one_incident(tmp_path: Path) -> None:
     with application.state.engine.begin() as connection:
         connection.exec_driver_sql("PRAGMA journal_mode=WAL")
         connection.exec_driver_sql("PRAGMA busy_timeout=5000")
-    with TestClient(application) as client:
+    from uuid import UUID
+
+    from app.tests.helpers import CookieClient, register_user
+
+    with CookieClient(application) as client:
+        register_user(client)
         _upload_events(client, [_failure(minute) for minute in range(5)])
+        workspace_id = UUID(client.get("/api/auth/me").json()["workspace"]["id"])
 
         def _run() -> tuple[int, int, int]:
             session = application.state.session_factory()
             try:
-                result = detect_incidents(session, settings)
+                result = detect_incidents(session, settings, workspace_id=workspace_id)
                 return result.created, result.updated, result.skipped
             finally:
                 session.close()

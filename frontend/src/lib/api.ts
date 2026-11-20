@@ -6,8 +6,9 @@ import {
   type IncidentApiItem,
   type IncidentListApi,
 } from "@/lib/actions";
-import { analystProxyUrl, isAbortError } from "@/lib/analyst-proxy";
+import { isAbortError } from "@/lib/analyst-proxy";
 import { API_BASE_URL } from "@/lib/constants";
+import { csrfHeaders } from "@/lib/csrf";
 import { isHtmlContentType, safeReportFilename } from "@/lib/report";
 import type {
   AgentName,
@@ -89,7 +90,11 @@ async function jsonRequest<T>(
   try {
     response = await fetch(apiUrl(path), {
       method,
-      headers: { Accept: "application/json" },
+      credentials: "include",
+      headers: {
+        Accept: "application/json",
+        ...(method === "POST" ? csrfHeaders() : {}),
+      },
       signal,
     });
   } catch (error) {
@@ -105,7 +110,7 @@ async function jsonRequest<T>(
     throw new ApiError(
       errorBody.detail ?? `Request failed with status ${response.status}`,
       response.status,
-      errorBody.code ?? "http_error",
+      errorBody.code ?? (response.status === 401 ? "unauthenticated" : "http_error"),
     );
   }
   return body as T;
@@ -246,7 +251,8 @@ export async function uploadLogs(file: File, signal?: AbortSignal): Promise<LogU
   try {
     response = await fetch(apiUrl("/api/logs/upload"), {
       method: "POST",
-      headers: { Accept: "application/json" },
+      credentials: "include",
+      headers: { Accept: "application/json", ...csrfHeaders() },
       body,
       signal,
     });
@@ -349,7 +355,7 @@ export async function listIncidentAuditLogs(
   signal?: AbortSignal,
 ): Promise<AuditLogEntry[]> {
   const payload = await apiGet<AuditLogListApi>(
-    analystProxyUrl(`/api/incidents/${incidentId}/audit-logs`),
+    `/api/incidents/${incidentId}/audit-logs`,
     signal,
   );
   return payload.items.map(mapAuditLog);
@@ -359,14 +365,14 @@ export async function approveAction(
   actionId: string,
   signal?: AbortSignal,
 ): Promise<ActionDecisionApi> {
-  return apiPost<ActionDecisionApi>(analystProxyUrl(`/api/actions/${actionId}/approve`), signal);
+  return apiPost<ActionDecisionApi>(`/api/actions/${actionId}/approve`, signal);
 }
 
 export async function rejectAction(
   actionId: string,
   signal?: AbortSignal,
 ): Promise<ActionDecisionApi> {
-  return apiPost<ActionDecisionApi>(analystProxyUrl(`/api/actions/${actionId}/reject`), signal);
+  return apiPost<ActionDecisionApi>(`/api/actions/${actionId}/reject`, signal);
 }
 
 export type DownloadedReport = {
@@ -381,8 +387,9 @@ export async function downloadIncidentReport(
 ): Promise<DownloadedReport> {
   let response: Response;
   try {
-    response = await fetch(apiUrl(analystProxyUrl(`/api/incidents/${incidentId}/report`)), {
+    response = await fetch(apiUrl(`/api/incidents/${incidentId}/report`), {
       method: "GET",
+      credentials: "include",
       headers: { Accept: "text/html" },
       signal,
     });

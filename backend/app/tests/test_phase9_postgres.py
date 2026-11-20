@@ -25,7 +25,7 @@ from sqlalchemy.exc import OperationalError
 from app.core.config import Settings, get_settings
 from app.db.models import AuditLog, Incident, ResponseAction, SecurityEvent
 from app.main import create_app
-from app.tests.helpers import build_settings
+from app.tests.helpers import CookieClient, build_settings, register_user
 from app.tests.test_investigations import _open_incident
 
 VERIFY_DB = "aisoc_phase9_verify"
@@ -213,7 +213,8 @@ def postgres_client() -> Generator[TestClient]:
 
         application = create_app(build_settings(database_url=verify_url))
         application.state.test_database_url = verify_url
-        with TestClient(application) as client:
+        with CookieClient(application) as client:
+            register_user(client)
             yield client
     finally:
         if application is not None:
@@ -279,7 +280,7 @@ def test_postgres_phase9_persisted_response_workflow(postgres_client: TestClient
         stored = session.get(ResponseAction, uuid.UUID(first_id))
         assert stored is not None
         assert stored.approval_status == "approved"
-        assert stored.actor == "unverified"
+        assert stored.actor.startswith("user:")
         assert stored.decided_at is not None
         assert stored.simulated is True
         assert stored.execution_status == "not_executed"

@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.db.demo_data import BRUTE_SUCCESS_ID
 from app.db.models import SecurityEvent
+from app.tests.helpers import resolve_workspace_id
 
 
 def test_list_events_empty(client: TestClient) -> None:
@@ -88,6 +89,7 @@ def test_list_events_pages_identical_timestamps_by_id(client: TestClient) -> Non
     insert_order = [event_ids[4], event_ids[2], event_ids[0], event_ids[3], event_ids[1]]
     session = client.app.state.session_factory()
     try:
+        workspace_id = resolve_workspace_id(client, session)
         for event_id in insert_order:
             session.add(
                 SecurityEvent(
@@ -97,6 +99,7 @@ def test_list_events_pages_identical_timestamps_by_id(client: TestClient) -> Non
                     source_ip="192.0.2.10",
                     source="linux_auth",
                     raw_message=f"identical-timestamp event {event_id}",
+                    workspace_id=workspace_id,
                 )
             )
         session.commit()

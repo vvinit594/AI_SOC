@@ -34,6 +34,19 @@ _ALLOWED_EVENTS: frozenset[str] = frozenset(
     {"response_action.approved", "response_action.rejected"}
 )
 _ALLOWED_RESOURCES: frozenset[str] = frozenset({"response_action"})
+_MACHINE_ACTORS: frozenset[str] = frozenset({"analyst", "unverified"})
+
+
+def _valid_actor(actor: str) -> bool:
+    if actor in _MACHINE_ACTORS:
+        return True
+    if actor.startswith("user:"):
+        try:
+            uuid.UUID(actor.removeprefix("user:"))
+            return True
+        except ValueError:
+            return False
+    return False
 
 
 class AuditError(ValueError):
@@ -74,10 +87,15 @@ def record_event(
         raise AuditError("Unsupported audit event type", status_code=500)
     if resource_type not in _ALLOWED_RESOURCES:
         raise AuditError("Unsupported audit resource type", status_code=500)
-    if actor not in {"analyst", "unverified"}:
+    if not _valid_actor(actor):
         raise AuditError("Unsupported audit actor", status_code=500)
 
     payload = _decision_details(event_type, details)
+    workspace_id = None
+    if incident_id is not None:
+        incident = session.get(Incident, incident_id)
+        if incident is not None:
+            workspace_id = incident.workspace_id
 
     row = AuditLog(
         occurred_at=utc_now(),
@@ -86,6 +104,7 @@ def record_event(
         resource_type=resource_type,
         resource_id=resource_id,
         incident_id=incident_id,
+        workspace_id=workspace_id,
         details=payload,
     )
     session.add(row)
@@ -103,11 +122,14 @@ def list_incident_audit_logs(
     session: Session,
     incident_id: uuid.UUID,
     *,
+    workspace_id: uuid.UUID | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> tuple[list[AuditLog], int]:
     incident = session.get(Incident, incident_id)
     if incident is None:
+        raise AuditError("Incident not found", status_code=404)
+    if workspace_id is not None and incident.workspace_id != workspace_id:
         raise AuditError("Incident not found", status_code=404)
     filters = [AuditLog.incident_id == incident_id]
     total = session.scalar(select(func.count()).select_from(AuditLog).where(*filters)) or 0

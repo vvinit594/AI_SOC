@@ -59,8 +59,13 @@ def content_disposition(filename: str) -> str:
     return f'attachment; filename="{filename}"'
 
 
-def build_incident_report(session: Session, incident_id: uuid.UUID) -> tuple[str, str]:
-    incident = incident_service.get_incident(session, incident_id)
+def build_incident_report(
+    session: Session,
+    incident_id: uuid.UUID,
+    *,
+    workspace_id: uuid.UUID | None = None,
+) -> tuple[str, str]:
+    incident = incident_service.get_incident(session, incident_id, workspace_id=workspace_id)
     if incident is None:
         raise ReportError("Incident not found", status_code=404)
     generated_at = utc_now()

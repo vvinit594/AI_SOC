@@ -14,7 +14,7 @@ from app.main import create_app
 from app.schemas.investigations import RecommendedAction
 from app.services.actions import decide_action
 from app.services.investigations import _store_actions
-from app.tests.helpers import build_settings
+from app.tests.helpers import build_settings, resolve_workspace_id
 from app.tests.test_investigations import _open_incident
 
 SECRET_TOKEN = "phase8a-test-token-not-for-production"
@@ -41,6 +41,7 @@ def _insert_proposed(
             severity="high",
             status=status,
             summary="fixture",
+            workspace_id=resolve_workspace_id(client, session),
         )
         session.add(incident)
         session.flush()
@@ -184,7 +185,7 @@ def test_approve_persists_simulated_decision(client: TestClient) -> None:
     assert body["approval_status"] == "approved"
     assert body["execution_status"] == "not_executed"
     assert body["simulated"] is True
-    assert body["actor"] == "unverified"
+    assert body["actor"].startswith("user:")
     decided_at = datetime.fromisoformat(body["decided_at"])
     assert before <= decided_at <= after
     assert body["incident_status"] == "awaiting_approval"
@@ -193,7 +194,7 @@ def test_approve_persists_simulated_decision(client: TestClient) -> None:
     assert stored.approval_status == "approved"
     assert stored.execution_status == "not_executed"
     assert stored.simulated is True
-    assert stored.actor == "unverified"
+    assert stored.actor is not None and stored.actor.startswith("user:")
     assert stored.decided_at is not None
 
 
@@ -205,7 +206,7 @@ def test_reject_persists_simulated_decision(client: TestClient) -> None:
     assert body["approval_status"] == "rejected"
     assert body["execution_status"] == "not_executed"
     assert body["simulated"] is True
-    assert body["actor"] == "unverified"
+    assert body["actor"].startswith("user:")
     assert body["decided_at"] is not None
     stored = _reload_action(client, action_id)
     assert stored.approval_status == "rejected"
@@ -299,7 +300,7 @@ def test_decision_survives_new_session(client: TestClient) -> None:
     assert client.post(f"/api/actions/{action_id}/approve").status_code == 200
     stored = _reload_action(client, action_id)
     assert stored.approval_status == "approved"
-    assert stored.actor == "unverified"
+    assert stored.actor is not None and stored.actor.startswith("user:")
     assert stored.decided_at is not None
     assert stored.simulated is True
 
@@ -390,7 +391,7 @@ def test_x_analyst_id_is_not_identity(client: TestClient) -> None:
         headers={"X-Analyst-Id": "alice@example.com"},
     )
     assert response.status_code == 200
-    assert response.json()["actor"] == "unverified"
+    assert response.json()["actor"].startswith("user:")
     assert "alice" not in response.text
 
 

@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.db.models import AgentRun, AuditLog, Incident, IncidentEvent, ResponseAction, SecurityEvent
+from app.tests.helpers import resolve_workspace_id
 from app.tests.test_actions import SECRET_TOKEN, _app_client, _insert_proposed, _reload_action
 from app.tests.test_investigations import _open_incident
 
@@ -48,12 +49,14 @@ def _insert_report_fixture(
 ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID | None]:
     session = client.app.state.session_factory()
     try:
+        workspace_id = resolve_workspace_id(client, session)
         incident = Incident(
             title=title,
             severity="high",
             status="awaiting_approval",
             summary=summary,
             scenario="A",
+            workspace_id=workspace_id,
         )
         session.add(incident)
         session.flush()
@@ -68,6 +71,7 @@ def _insert_report_fixture(
                 source="linux_auth",
                 raw_message=XSS_MESSAGE if "<" in title else "Failed password",
                 scenario="A",
+                workspace_id=workspace_id,
             )
             session.add(event)
             session.flush()
@@ -153,6 +157,7 @@ def _insert_report_fixture(
                     severity="low",
                     status="open",
                     summary="other",
+                    workspace_id=workspace_id,
                 )
             )
         session.commit()
@@ -205,7 +210,14 @@ def test_report_invalid_uuid_422(client: TestClient) -> None:
 def test_report_missing_optional_fields(client: TestClient) -> None:
     session = client.app.state.session_factory()
     try:
-        incident = Incident(title="Sparse incident", severity="low", status="open", summary="")
+        workspace_id = resolve_workspace_id(client, session)
+        incident = Incident(
+            title="Sparse incident",
+            severity="low",
+            status="open",
+            summary="",
+            workspace_id=workspace_id,
+        )
         session.add(incident)
         session.flush()
         event = SecurityEvent(
@@ -213,6 +225,7 @@ def test_report_missing_optional_fields(client: TestClient) -> None:
             event_type="login_success",
             source="linux_auth",
             raw_message="Accepted password",
+            workspace_id=workspace_id,
         )
         session.add(event)
         session.flush()
@@ -312,7 +325,7 @@ def test_report_audit_history_and_action_states(client: TestClient) -> None:
     assert "rejected" in document
     assert "response_action.approved" in document
     assert "response_action.rejected" in document
-    assert "unverified" in document
+    assert "user:" in document
     assert str(action_id) in document
     assert str(extra_id) in document
     assert "force_password_reset" in document

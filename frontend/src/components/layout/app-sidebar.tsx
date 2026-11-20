@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Shield } from "lucide-react";
 
+import { SessionUser } from "@/components/auth/session-user";
 import { isNavActive, NAV_ITEMS } from "@/components/layout/nav-config";
 import { Separator } from "@/components/ui/separator";
 import { APP_NAME } from "@/lib/constants";
@@ -47,8 +48,9 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void }) {
           );
         })}
       </nav>
-      <div className="p-4 text-[11px] leading-relaxed text-muted-foreground">
-        Frontend is separate from FastAPI. All secrets stay on the backend.
+      <div className="space-y-3 p-4 text-[11px] leading-relaxed text-muted-foreground">
+        <SessionUser />
+        <p>Frontend is separate from FastAPI. Session cookies stay HttpOnly on the API.</p>
       </div>
     </div>
   );

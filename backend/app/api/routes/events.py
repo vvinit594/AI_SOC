@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
+from app.api.deps import CurrentUser
 from app.db.session import get_db
 from app.schemas.enums import DemoScenario
 from app.schemas.events import EventListResponse, SecurityEventRead
@@ -11,6 +12,7 @@ router = APIRouter(prefix="/events", tags=["events"])
 
 @router.get("", response_model=EventListResponse, summary="List security events")
 def list_security_events(
+    principal: CurrentUser,
     event_type: str | None = None,
     source_ip: str | None = None,
     username: str | None = None,
@@ -21,6 +23,7 @@ def list_security_events(
 ) -> EventListResponse:
     items, total = event_service.list_events(
         session,
+        workspace_id=principal.workspace_id,
         event_type=event_type,
         source_ip=source_ip,
         username=username,

@@ -40,20 +40,25 @@ class _Plan:
     scenario: str | None
     created_at: datetime
     event_ids: list[uuid.UUID]
+    workspace_id: uuid.UUID = field(default_factory=uuid.uuid4)
     matches: list[_Match] = field(default_factory=list)
 
     @property
     def incident_id(self) -> uuid.UUID:
-        return uuid.uuid5(INCIDENT_NAMESPACE, self.fingerprint)
+        return uuid.uuid5(INCIDENT_NAMESPACE, f"{self.workspace_id}:{self.fingerprint}")
 
 
-def detect_incidents(session: Session, settings: Settings) -> DetectResponse:
+def detect_incidents(
+    session: Session, settings: Settings, *, workspace_id: uuid.UUID
+) -> DetectResponse:
     events = list(
         session.scalars(
-            select(SecurityEvent).order_by(SecurityEvent.timestamp.asc(), SecurityEvent.id.asc())
+            select(SecurityEvent)
+            .where(SecurityEvent.workspace_id == workspace_id)
+            .order_by(SecurityEvent.timestamp.asc(), SecurityEvent.id.asc())
         ).all()
     )
-    plans = _build_plans(events, settings)
+    plans = _build_plans(events, settings, workspace_id)
     created = 0
     updated = 0
     skipped = 0
@@ -77,7 +82,7 @@ def detect_incidents(session: Session, settings: Settings) -> DetectResponse:
             updated += 1
         else:
             skipped += 1
-        loaded = incident_service.get_incident(session, incident_id)
+        loaded = incident_service.get_incident(session, incident_id, workspace_id=workspace_id)
         assert loaded is not None
         incidents.append(loaded)
         for match in plan.matches:
@@ -124,6 +129,7 @@ def _persist_plan(session: Session, plan: _Plan) -> tuple[Incident, str]:
 def _create_or_lock_existing(session: Session, plan: _Plan) -> tuple[Incident, bool]:
     incident = Incident(
         id=plan.incident_id,
+        workspace_id=plan.workspace_id,
         title=plan.title,
         severity=plan.severity,
         status="open",
@@ -199,7 +205,9 @@ def _ensure_links(session: Session, incident_id: uuid.UUID, event_ids: list[uuid
             incident_service.link_incident_event(session, incident_id, event_id)
 
 
-def _build_plans(events: list[SecurityEvent], settings: Settings) -> list[_Plan]:
+def _build_plans(
+    events: list[SecurityEvent], settings: Settings, workspace_id: uuid.UUID
+) -> list[_Plan]:
     auth_window = timedelta(minutes=settings.rule_auth_failure_window_minutes)
     outbound_window = timedelta(minutes=settings.rule_outbound_window_minutes)
     auth_n = settings.rule_auth_failure_threshold
@@ -210,7 +218,10 @@ def _build_plans(events: list[SecurityEvent], settings: Settings) -> list[_Plan]
         *_auth_plans(events, auth_n, auth_window),
         *_outbound_plans(events, outbound_m, outbound_window, seeded),
     ]
-    return _merge_plans(plans)
+    merged = _merge_plans(plans)
+    for plan in merged:
+        plan.workspace_id = workspace_id
+    return merged
 
 
 def _auth_plans(

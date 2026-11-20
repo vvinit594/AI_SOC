@@ -87,7 +87,12 @@ class RunRecorder:
         return run
 
 
-def get_investigation(session: Session, investigation_id: uuid.UUID) -> InvestigationRead | None:
+def get_investigation(
+    session: Session,
+    investigation_id: uuid.UUID,
+    *,
+    workspace_id: uuid.UUID | None = None,
+) -> InvestigationRead | None:
     rows = list(
         session.scalars(
             select(AgentRun)
@@ -97,6 +102,10 @@ def get_investigation(session: Session, investigation_id: uuid.UUID) -> Investig
     )
     if not rows:
         return None
+    if workspace_id is not None:
+        incident = session.get(Incident, rows[0].incident_id)
+        if incident is None or incident.workspace_id != workspace_id:
+            return None
     return _to_read(investigation_id, rows)
 
 
@@ -105,10 +114,11 @@ def start_investigation(
     settings: Settings,
     incident_id: uuid.UUID,
     *,
+    workspace_id: uuid.UUID | None = None,
     llm=None,
     intel=None,
 ) -> InvestigateResponse:
-    incident = incident_service.get_incident(session, incident_id)
+    incident = incident_service.get_incident(session, incident_id, workspace_id=workspace_id)
     if incident is None:
         raise InvestigationError("Incident not found", status_code=404)
     if incident.status in _CLOSED:

@@ -24,7 +24,7 @@ from app.core.config import Settings, get_settings
 from app.db.demo_data import BRUTE_FAILURE_IDS, BRUTE_SUCCESS_ID, OUTBOUND_IDS
 from app.db.models import Incident
 from app.main import create_app
-from app.tests.helpers import build_settings
+from app.tests.helpers import CookieClient, build_settings, register_user
 
 VERIFY_DB = "aisoc_phase5_verify"
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
@@ -106,7 +106,8 @@ def postgres_client() -> Generator[TestClient]:
         pytest.skip(f"PostgreSQL Phase 5 verify DB unavailable ({type(exc).__name__})")
 
     application = create_app(build_settings(database_url=verify_url))
-    with TestClient(application) as client:
+    with CookieClient(application) as client:
+        register_user(client)
         yield client
 
     if using_throwaway:

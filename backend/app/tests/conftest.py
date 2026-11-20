@@ -17,7 +17,7 @@ from app.db import models as _db_models  # noqa: F401
 from app.db.base import Base
 from app.db.seed import seed_demo_data
 from app.main import create_app
-from app.tests.helpers import build_settings
+from app.tests.helpers import CookieClient, build_settings, register_user
 
 
 @pytest.fixture
@@ -33,15 +33,25 @@ def application(settings: Settings) -> FastAPI:
 
 
 @pytest.fixture
-def client(application: FastAPI) -> Generator[TestClient]:
+def anonymous_client(application: FastAPI) -> Generator[TestClient]:
     with TestClient(application) as test_client:
         yield test_client
 
 
 @pytest.fixture
-def seed_db(application: FastAPI) -> dict[str, int]:
+def client(application: FastAPI) -> Generator[TestClient]:
+    with CookieClient(application) as test_client:
+        register_user(test_client)
+        yield test_client
+
+
+@pytest.fixture
+def seed_db(application: FastAPI, client: TestClient) -> dict[str, int]:
+    workspace_id = client.get("/api/auth/me").json()["workspace"]["id"]
     session = application.state.session_factory()
     try:
-        return seed_demo_data(session)
+        from uuid import UUID
+
+        return seed_demo_data(session, workspace_id=UUID(workspace_id))
     finally:
         session.close()

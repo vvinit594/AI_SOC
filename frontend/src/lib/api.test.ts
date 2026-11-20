@@ -151,8 +151,8 @@ describe("response and report API client", () => {
     vi.stubGlobal("fetch", fetchMock);
     const result = await approveAction(ACTION_ID);
     expect(fetchMock).toHaveBeenCalledWith(
-      `/api/analyst/actions/${ACTION_ID}/approve`,
-      expect.objectContaining({ method: "POST" }),
+      `${API_BASE_URL}/api/actions/${ACTION_ID}/approve`,
+      expect.objectContaining({ method: "POST", credentials: "include" }),
     );
     expect(result.approval_status).toBe("approved");
     expect(result.execution_status).toBe("not_executed");
@@ -166,7 +166,7 @@ describe("response and report API client", () => {
     vi.stubGlobal("fetch", fetchMock);
     const result = await rejectAction(ACTION_ID);
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      `/api/analyst/actions/${ACTION_ID}/reject`,
+      `${API_BASE_URL}/api/actions/${ACTION_ID}/reject`,
     );
     expect(result.approval_status).toBe("rejected");
   });
@@ -217,7 +217,7 @@ describe("response and report API client", () => {
     vi.stubGlobal("fetch", fetchMock);
     const items = await listIncidentAuditLogs(INCIDENT_ID);
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      `/api/analyst/incidents/${INCIDENT_ID}/audit-logs`,
+      `${API_BASE_URL}/api/incidents/${INCIDENT_ID}/audit-logs`,
     );
     expect(items).toHaveLength(1);
     expect(items[0]?.eventType).toBe("response_action.approved");
@@ -238,7 +238,7 @@ describe("response and report API client", () => {
     vi.stubGlobal("fetch", fetchMock);
     const report = await downloadIncidentReport(INCIDENT_ID);
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      `/api/analyst/incidents/${INCIDENT_ID}/report`,
+      `${API_BASE_URL}/api/incidents/${INCIDENT_ID}/report`,
     );
     expect(report.filename).toBe(`incident-${INCIDENT_ID}-report.html`);
     expect(report.contentType).toContain("text/html");

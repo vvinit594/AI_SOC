@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from app.api.deps import CurrentUser
 from app.db.session import get_db
 from app.schemas.common import ErrorResponse
 from app.schemas.investigations import InvestigationRead
@@ -23,9 +24,12 @@ _SSE_HEADERS = {
 @router.get("/{investigation_id}", response_model=InvestigationRead, summary="Get investigation")
 def read_investigation(
     investigation_id: uuid.UUID,
+    principal: CurrentUser,
     session: Session = Depends(get_db),
 ) -> InvestigationRead:
-    loaded = get_investigation(session, investigation_id)
+    loaded = get_investigation(
+        session, investigation_id, workspace_id=principal.workspace_id
+    )
     if loaded is None:
         raise HTTPException(status_code=404, detail="Investigation not found")
     return loaded
@@ -39,12 +43,15 @@ def read_investigation(
 def stream_investigation(
     investigation_id: uuid.UUID,
     request: Request,
+    principal: CurrentUser,
     last_event_id: Annotated[str | None, Header(alias="Last-Event-ID")] = None,
 ) -> StreamingResponse:
     factory = request.app.state.session_factory
     session = factory()
     try:
-        loaded = get_investigation(session, investigation_id)
+        loaded = get_investigation(
+            session, investigation_id, workspace_id=principal.workspace_id
+        )
     finally:
         session.close()
     if loaded is None:

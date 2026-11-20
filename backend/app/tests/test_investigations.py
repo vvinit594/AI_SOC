@@ -9,11 +9,13 @@ from app.db.models import Incident, IncidentEvent, ResponseAction, SecurityEvent
 from app.schemas.investigations import AgentFinding
 from app.services.llm import LLMError
 from app.services.threat_intel import NoneThreatIntel, is_documentation_ip
+from app.tests.helpers import resolve_workspace_id
 
 
 def _open_incident(client: TestClient) -> str:
     session = client.app.state.session_factory()
     try:
+        workspace_id = resolve_workspace_id(client, session)
         event = SecurityEvent(
             timestamp=datetime(2026, 10, 21, 12, 0, tzinfo=UTC),
             event_type="login_failure",
@@ -24,6 +26,7 @@ def _open_incident(client: TestClient) -> str:
             source="linux_auth",
             raw_message="Failed password",
             scenario="A",
+            workspace_id=workspace_id,
         )
         incident = Incident(
             title="Test brute force",
@@ -31,6 +34,7 @@ def _open_incident(client: TestClient) -> str:
             status="open",
             summary="test",
             scenario="A",
+            workspace_id=workspace_id,
         )
         session.add_all([event, incident])
         session.flush()
@@ -153,6 +157,7 @@ def test_scenario_c_does_not_claim_confirmed_attack(client: TestClient) -> None:
             status="open",
             summary="manual",
             scenario="C",
+            workspace_id=resolve_workspace_id(client, session),
         )
         session.add(incident)
         session.flush()

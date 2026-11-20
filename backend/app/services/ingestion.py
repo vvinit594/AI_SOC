@@ -4,6 +4,7 @@ import csv
 import io
 import json
 import logging
+import uuid
 from typing import Any, Literal
 
 from pydantic import ValidationError
@@ -83,6 +84,8 @@ def ingest_records(
     session: Session,
     records: list[dict[str, Any]],
     settings: Settings,
+    *,
+    workspace_id: uuid.UUID,
 ) -> LogUploadResponse:
     if not records:
         raise IngestFileError("No events found in upload")
@@ -125,7 +128,9 @@ def ingest_records(
     if conflicted_ids:
         valid = [item for item in valid if item[1].get("id") not in conflicted_ids]
 
-    existing_conflicts = _conflicting_existing_ids(session, [item[1] for item in valid])
+    existing_conflicts = _conflicting_existing_ids(
+        session, [item[1] for item in valid], workspace_id=workspace_id
+    )
     if existing_conflicts:
         kept: list[tuple[int, dict[str, object]]] = []
         for index, payload in valid:
@@ -145,7 +150,9 @@ def ingest_records(
         raise IngestFileError("No valid events in upload", errors=errors)
 
     try:
-        event_ids = event_service.upsert_events(session, [item[1] for item in valid])
+        event_ids = event_service.upsert_events(
+            session, [item[1] for item in valid], workspace_id=workspace_id
+        )
     except SQLAlchemyError as exc:
         raise IngestFileError("Failed to persist events", status_code=500) from exc
     return LogUploadResponse(
@@ -156,13 +163,23 @@ def ingest_records(
     )
 
 
-def _conflicting_existing_ids(session: Session, payloads: list[dict[str, object]]) -> set[object]:
+def _conflicting_existing_ids(
+    session: Session,
+    payloads: list[dict[str, object]],
+    *,
+    workspace_id: uuid.UUID,
+) -> set[object]:
     wanted = [payload["id"] for payload in payloads if payload.get("id") is not None]
     if not wanted:
         return set()
     existing = {
         row.id: row
-        for row in session.scalars(select(SecurityEvent).where(SecurityEvent.id.in_(wanted))).all()
+        for row in session.scalars(
+            select(SecurityEvent).where(
+                SecurityEvent.id.in_(wanted),
+                SecurityEvent.workspace_id == workspace_id,
+            )
+        ).all()
     }
     conflicts: set[object] = set()
     for payload in payloads:
@@ -173,10 +190,12 @@ def _conflicting_existing_ids(session: Session, payloads: list[dict[str, object]
     return conflicts
 
 
-def load_scenario(session: Session, scenario: DemoScenario) -> ScenarioLoadResponse:
+def load_scenario(
+    session: Session, scenario: DemoScenario, *, workspace_id: uuid.UUID
+) -> ScenarioLoadResponse:
     records = [event for event in demo_events() if event["scenario"] == scenario]
     try:
-        event_ids = event_service.upsert_events(session, records)
+        event_ids = event_service.upsert_events(session, records, workspace_id=workspace_id)
     except SQLAlchemyError:
         logger.exception("Failed to persist demo scenario %s", scenario)
         raise

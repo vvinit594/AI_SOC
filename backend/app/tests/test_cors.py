@@ -14,6 +14,7 @@ def test_health_includes_cors_allow_origin(client: TestClient) -> None:
     response = client.get("/health", headers={"Origin": ALLOWED_ORIGIN})
     assert response.status_code == 200
     assert response.headers.get("access-control-allow-origin") == ALLOWED_ORIGIN
+    assert response.headers.get("access-control-allow-credentials") == "true"
 
 
 def test_preflight_allows_configured_origin(client: TestClient) -> None:
@@ -91,6 +92,7 @@ def test_approve_preflight_allows_authorization_from_configured_origin(
     assert response.headers.get("access-control-allow-origin") == ALLOWED_ORIGIN
     allowed_headers = response.headers.get("access-control-allow-headers", "").lower()
     assert "authorization" in allowed_headers
+    assert "x-csrf-token" in allowed_headers
 
 
 def test_protected_routes_do_not_reflect_disallowed_origin(client: TestClient) -> None:

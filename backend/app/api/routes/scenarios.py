@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from app.api.deps import CurrentUser
 from app.db.session import get_db
 from app.schemas.enums import DemoScenario
 from app.schemas.ingestion import ScenarioLoadResponse
@@ -16,6 +17,7 @@ router = APIRouter(prefix="/scenarios", tags=["scenarios"])
 )
 def load_demo_scenario(
     name: DemoScenario,
+    principal: CurrentUser,
     session: Session = Depends(get_db),
 ) -> ScenarioLoadResponse:
-    return load_scenario(session, name)
+    return load_scenario(session, name, workspace_id=principal.workspace_id)

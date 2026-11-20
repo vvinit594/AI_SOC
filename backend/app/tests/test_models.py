@@ -5,31 +5,18 @@ from fastapi.testclient import TestClient
 from sqlalchemy import inspect, select
 
 from app.db.models import AgentRun, Incident, IncidentEvent, ResponseAction, SecurityEvent
+from app.tests.helpers import AUTH_TABLES, TENANT_TABLES, resolve_workspace_id
 
 
 def test_metadata_registers_v1_tables() -> None:
     from app.db.base import Base
 
-    assert set(Base.metadata.tables) == {
-        "security_events",
-        "incidents",
-        "incident_events",
-        "agent_runs",
-        "response_actions",
-        "audit_logs",
-    }
+    assert set(Base.metadata.tables) == AUTH_TABLES | TENANT_TABLES
 
 
 def test_sqlite_schema_matches_models(client: TestClient) -> None:
     inspector = inspect(client.app.state.engine)
-    assert set(inspector.get_table_names()) == {
-        "security_events",
-        "incidents",
-        "incident_events",
-        "agent_runs",
-        "response_actions",
-        "audit_logs",
-    }
+    assert set(inspector.get_table_names()) == AUTH_TABLES | TENANT_TABLES
 
 
 def test_event_incident_and_action_round_trip(client: TestClient) -> None:
@@ -38,6 +25,7 @@ def test_event_incident_and_action_round_trip(client: TestClient) -> None:
         event_id = uuid.uuid4()
         incident_id = uuid.uuid4()
         timestamp = datetime(2026, 10, 21, 10, 15, tzinfo=UTC)
+        workspace_id = resolve_workspace_id(client, session)
         event = SecurityEvent(
             id=event_id,
             timestamp=timestamp,
@@ -49,6 +37,7 @@ def test_event_incident_and_action_round_trip(client: TestClient) -> None:
             source="linux_auth",
             raw_message="Failed password for demo_user from 192.0.2.10",
             scenario="A",
+            workspace_id=workspace_id,
         )
         incident = Incident(
             id=incident_id,
@@ -57,6 +46,7 @@ def test_event_incident_and_action_round_trip(client: TestClient) -> None:
             status="open",
             summary="Repeated failures from 192.0.2.10",
             scenario="A",
+            workspace_id=workspace_id,
         )
         session.add_all([event, incident])
         session.flush()
@@ -112,17 +102,20 @@ def test_incident_event_pair_is_unique(client: TestClient) -> None:
 
     session = client.app.state.session_factory()
     try:
+        workspace_id = resolve_workspace_id(client, session)
         event = SecurityEvent(
             timestamp=datetime(2026, 10, 21, 8, 0, tzinfo=UTC),
             event_type="login_success",
             source="linux_auth",
             raw_message="Accepted publickey",
+            workspace_id=workspace_id,
         )
         incident = Incident(
             title="Unique constraint check",
             severity="low",
             status="open",
             summary="Duplicate evidence link must fail",
+            workspace_id=workspace_id,
         )
         session.add_all([event, incident])
         session.flush()
@@ -160,6 +153,7 @@ def test_incident_event_rejects_missing_event_foreign_key(client: TestClient) ->
             severity="low",
             status="open",
             summary="Link must reference an existing event",
+            workspace_id=resolve_workspace_id(client, session),
         )
         session.add(incident)
         session.flush()
@@ -184,17 +178,20 @@ def test_deleting_incident_cascades_event_links(client: TestClient) -> None:
 
     session = client.app.state.session_factory()
     try:
+        workspace_id = resolve_workspace_id(client, session)
         event = SecurityEvent(
             timestamp=datetime(2026, 10, 21, 8, 0, tzinfo=UTC),
             event_type="login_success",
             source="linux_auth",
             raw_message="Accepted publickey",
+            workspace_id=workspace_id,
         )
         incident = Incident(
             title="Cascade check",
             severity="low",
             status="open",
             summary="Deleting an incident must remove evidence links",
+            workspace_id=workspace_id,
         )
         session.add_all([event, incident])
         session.flush()

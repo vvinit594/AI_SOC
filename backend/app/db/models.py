@@ -11,6 +11,115 @@ from app.db.base import Base
 from app.db.types import UTCDateTime
 
 
+class User(Base):
+    __tablename__ = "users"
+    __table_args__ = (Index("ix_users_email", "email", unique=True),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    full_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utc_now)
+
+    memberships: Mapped[list["WorkspaceMembership"]] = relationship(back_populates="user")
+    sessions: Mapped[list["UserSession"]] = relationship(back_populates="user")
+
+
+class Workspace(Base):
+    __tablename__ = "workspaces"
+    __table_args__ = (Index("ix_workspaces_kind", "kind"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False, default="personal")
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utc_now)
+
+    memberships: Mapped[list["WorkspaceMembership"]] = relationship(back_populates="workspace")
+
+
+class WorkspaceMembership(Base):
+    __tablename__ = "workspace_memberships"
+    __table_args__ = (
+        UniqueConstraint("user_id", "workspace_id", name="uq_workspace_memberships_user_workspace"),
+        Index("ix_workspace_memberships_workspace_id", "workspace_id"),
+        Index("ix_workspace_memberships_user_id", "user_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    )
+    role: Mapped[str] = mapped_column(String(32), nullable=False, default="owner")
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utc_now)
+
+    user: Mapped[User] = relationship(back_populates="memberships")
+    workspace: Mapped[Workspace] = relationship(back_populates="memberships")
+
+
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+    __table_args__ = (
+        Index("ix_user_sessions_token_hash", "token_hash", unique=True),
+        Index("ix_user_sessions_user_id", "user_id"),
+        Index("ix_user_sessions_expires_at", "expires_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    csrf_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utc_now)
+    last_seen_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utc_now)
+    user_agent: Mapped[str | None] = mapped_column(String(255))
+    ip_address: Mapped[str | None] = mapped_column(String(45))
+
+    user: Mapped[User] = relationship(back_populates="sessions")
+    workspace: Mapped[Workspace] = relationship()
+
+
+class LoginAttempt(Base):
+    __tablename__ = "login_attempts"
+    __table_args__ = (
+        Index("ix_login_attempts_email_attempted_at", "email", "attempted_at"),
+        Index("ix_login_attempts_ip_attempted_at", "ip_address", "attempted_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    ip_address: Mapped[str | None] = mapped_column(String(45))
+    succeeded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    attempted_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utc_now)
+
+
+class PasswordRecoveryToken(Base):
+    __tablename__ = "password_recovery_tokens"
+    __table_args__ = (
+        Index("ix_password_recovery_tokens_token_hash", "token_hash", unique=True),
+        Index("ix_password_recovery_tokens_user_id", "user_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utc_now)
+
+    user: Mapped[User] = relationship()
+
+
 class SecurityEvent(Base):
     __tablename__ = "security_events"
     __table_args__ = (
@@ -19,9 +128,13 @@ class SecurityEvent(Base):
         Index("ix_security_events_source_ip", "source_ip"),
         Index("ix_security_events_username", "username"),
         Index("ix_security_events_hostname", "hostname"),
+        Index("ix_security_events_workspace_id", "workspace_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="RESTRICT"), nullable=False
+    )
     timestamp: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
     source_ip: Mapped[str | None] = mapped_column(String(45))
@@ -35,6 +148,7 @@ class SecurityEvent(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utc_now)
 
     incident_links: Mapped[list["IncidentEvent"]] = relationship(back_populates="event")
+    workspace: Mapped[Workspace] = relationship()
 
 
 class Incident(Base):
@@ -43,9 +157,13 @@ class Incident(Base):
         Index("ix_incidents_created_at", "created_at"),
         Index("ix_incidents_severity", "severity"),
         Index("ix_incidents_status", "status"),
+        Index("ix_incidents_workspace_id", "workspace_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="RESTRICT"), nullable=False
+    )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     severity: Mapped[str] = mapped_column(String(16), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -62,6 +180,7 @@ class Incident(Base):
     response_actions: Mapped[list["ResponseAction"]] = relationship(
         back_populates="incident", cascade="all, delete-orphan"
     )
+    workspace: Mapped[Workspace] = relationship()
 
 
 class IncidentEvent(Base):
@@ -135,7 +254,7 @@ class ResponseAction(Base):
     simulated: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utc_now)
     decided_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
-    actor: Mapped[str | None] = mapped_column(String(32))
+    actor: Mapped[str | None] = mapped_column(String(64))
 
     incident: Mapped[Incident] = relationship(back_populates="response_actions")
 
@@ -149,15 +268,19 @@ class AuditLog(Base):
         Index("ix_audit_logs_incident_id", "incident_id"),
         Index("ix_audit_logs_resource", "resource_type", "resource_id"),
         Index("ix_audit_logs_event_type", "event_type"),
+        Index("ix_audit_logs_workspace_id", "workspace_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     occurred_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utc_now)
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
-    actor: Mapped[str] = mapped_column(String(32), nullable=False)
+    actor: Mapped[str] = mapped_column(String(64), nullable=False)
     resource_type: Mapped[str] = mapped_column(String(32), nullable=False)
     resource_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
     incident_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("incidents.id", ondelete="SET NULL")
+    )
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="SET NULL")
     )
     details: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)

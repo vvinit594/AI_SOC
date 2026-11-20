@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.routes import (
     actions,
+    auth,
     events,
     incidents,
     investigations,
@@ -11,6 +12,7 @@ from app.api.routes import (
 )
 
 api_router = APIRouter()
+api_router.include_router(auth.router)
 api_router.include_router(logs.router)
 api_router.include_router(scenarios.router)
 api_router.include_router(events.router)

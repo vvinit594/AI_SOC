@@ -36,6 +36,7 @@ def event_signature(payload: dict[str, Any] | SecurityEvent) -> tuple[object, ..
 def list_events(
     session: Session,
     *,
+    workspace_id: uuid.UUID,
     event_type: str | None = None,
     source_ip: str | None = None,
     username: str | None = None,
@@ -43,7 +44,7 @@ def list_events(
     limit: int = 100,
     offset: int = 0,
 ) -> tuple[list[SecurityEvent], int]:
-    filters = []
+    filters = [SecurityEvent.workspace_id == workspace_id]
     if event_type:
         filters.append(SecurityEvent.event_type == event_type)
     if source_ip:
@@ -66,17 +67,35 @@ def list_events(
     return items, total
 
 
-def get_event(session: Session, event_id: uuid.UUID) -> SecurityEvent | None:
-    return session.get(SecurityEvent, event_id)
+def get_event(
+    session: Session, event_id: uuid.UUID, *, workspace_id: uuid.UUID | None = None
+) -> SecurityEvent | None:
+    event = session.get(SecurityEvent, event_id)
+    if event is None:
+        return None
+    if workspace_id is not None and event.workspace_id != workspace_id:
+        return None
+    return event
 
 
-def upsert_events(session: Session, payloads: list[dict[str, object]]) -> list[uuid.UUID]:
+def upsert_events(
+    session: Session,
+    payloads: list[dict[str, object]],
+    *,
+    workspace_id: uuid.UUID,
+) -> list[uuid.UUID]:
     ids: list[uuid.UUID] = []
     try:
         for payload in payloads:
             fields = dict(payload)
-            if fields.get("id") is None:
+            fields["workspace_id"] = workspace_id
+            requested_id = fields.get("id")
+            if requested_id is None:
                 fields["id"] = uuid.uuid4()
+            else:
+                existing = session.get(SecurityEvent, requested_id)
+                if existing is not None and existing.workspace_id != workspace_id:
+                    fields["id"] = uuid.uuid5(workspace_id, str(requested_id))
             merged = session.merge(SecurityEvent(**fields))
             ids.append(merged.id)
         session.commit()

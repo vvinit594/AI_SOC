@@ -3,6 +3,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
+from app.api.deps import CurrentUser
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.schemas.common import ErrorResponse
@@ -20,6 +21,7 @@ router = APIRouter(prefix="/logs", tags=["logs"])
 @router.post("/upload", response_model=LogUploadResponse, summary="Upload JSON or CSV events")
 async def upload_logs(
     file: UploadFile,
+    principal: CurrentUser,
     session: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> LogUploadResponse | JSONResponse:
@@ -31,7 +33,9 @@ async def upload_logs(
     try:
         fmt = detect_format(file.filename, file.content_type)
         records = parse_upload_bytes(payload, fmt)
-        return ingest_records(session, records, settings)
+        return ingest_records(
+            session, records, settings, workspace_id=principal.workspace_id
+        )
     except IngestFileError as exc:
         if exc.errors:
             return JSONResponse(

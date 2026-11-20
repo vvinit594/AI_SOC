@@ -41,7 +41,7 @@ def test_approve_writes_one_audit_event(client: TestClient) -> None:
     assert len(rows) == 1
     row = rows[0]
     assert row.event_type == "response_action.approved"
-    assert row.actor == "unverified"
+    assert row.actor.startswith("user:")
     assert row.resource_type == "response_action"
     assert row.resource_id == action_id
     assert row.incident_id == incident_id
@@ -105,7 +105,7 @@ def test_audit_survives_new_session(client: TestClient) -> None:
     rows = _list_audits(client, incident_id)
     assert len(rows) == 1
     assert rows[0].occurred_at is not None
-    assert rows[0].actor == "unverified"
+    assert rows[0].actor.startswith("user:")
 
 
 def test_failed_audit_rolls_back_decision(
@@ -250,7 +250,7 @@ def test_x_analyst_id_is_not_used_as_audit_actor(client: TestClient) -> None:
     )
     assert response.status_code == 200
     rows = _list_audits(client, incident_id)
-    assert rows[0].actor == "unverified"
+    assert rows[0].actor.startswith("user:")
     assert "alice" not in str(rows[0].details)
 
 

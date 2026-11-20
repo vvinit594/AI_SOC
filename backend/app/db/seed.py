@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -11,21 +12,26 @@ from app.core.config import get_settings
 from app.db.demo_data import demo_events, demo_incidents
 from app.db.models import Incident, IncidentEvent, SecurityEvent
 from app.db.session import create_engine_from_settings, create_session_factory
+from app.services.workspaces import ensure_legacy_workspace
 
 logger = logging.getLogger(__name__)
 
 
-def seed_demo_data(session: Session) -> dict[str, int]:
+def seed_demo_data(
+    session: Session, *, workspace_id: uuid.UUID | None = None
+) -> dict[str, int]:
     events = demo_events()
     incidents = demo_incidents()
+    target_workspace = workspace_id or ensure_legacy_workspace(session).id
 
     for payload in events:
-        session.merge(SecurityEvent(**payload))
+        session.merge(SecurityEvent(**payload, workspace_id=target_workspace))
     session.flush()
 
     for payload in incidents:
         event_ids = list(payload["event_ids"])
         fields = {key: value for key, value in payload.items() if key != "event_ids"}
+        fields["workspace_id"] = target_workspace
         session.merge(Incident(**fields))
         for event_id in event_ids:
             existing = session.scalar(

@@ -1,11 +1,10 @@
 import uuid
-from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
-from app.core.auth import AnalystAuthError, resolve_actor
+from app.api.deps import Access, CurrentUser, workspace_incident_or_404
 from app.core.config import Settings, get_settings
 from app.db.models import Incident
 from app.db.session import get_db
@@ -51,6 +50,7 @@ def _to_read(incident: Incident, *, include_actions: bool = False) -> IncidentRe
 
 @router.get("", response_model=IncidentListResponse, summary="List incidents")
 def list_incidents(
+    principal: CurrentUser,
     status: IncidentStatus | None = None,
     severity: Severity | None = None,
     limit: int = Query(default=100, ge=1, le=500),
@@ -59,6 +59,7 @@ def list_incidents(
 ) -> IncidentListResponse:
     items, total = incident_service.list_incidents(
         session,
+        workspace_id=principal.workspace_id,
         status=status,
         severity=severity,
         limit=limit,
@@ -69,10 +70,11 @@ def list_incidents(
 
 @router.post("/detect", response_model=DetectResponse, summary="Run detection rules")
 def run_detection(
+    principal: CurrentUser,
     session: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> DetectResponse:
-    return detect_incidents(session, settings)
+    return detect_incidents(session, settings, workspace_id=principal.workspace_id)
 
 
 @router.post(
@@ -82,11 +84,14 @@ def run_detection(
 )
 def investigate_incident(
     incident_id: uuid.UUID,
+    principal: CurrentUser,
     session: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> InvestigateResponse:
     try:
-        return start_investigation(session, settings, incident_id)
+        return start_investigation(
+            session, settings, incident_id, workspace_id=principal.workspace_id
+        )
     except InvestigationError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
@@ -98,17 +103,20 @@ def investigate_incident(
 )
 def get_incident_audit_logs(
     incident_id: uuid.UUID,
+    access: Access,
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-    authorization: Annotated[str | None, Header()] = None,
 ) -> AuditLogListResponse:
+    workspace_incident_or_404(session, incident_id, access)
     try:
-        resolve_actor(settings, authorization)
-        items, total = list_incident_audit_logs(session, incident_id, limit=limit, offset=offset)
-    except AnalystAuthError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        items, total = list_incident_audit_logs(
+            session,
+            incident_id,
+            workspace_id=access.workspace_id,
+            limit=limit,
+            offset=offset,
+        )
     except AuditError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     return AuditLogListResponse(
@@ -124,15 +132,14 @@ def get_incident_audit_logs(
 )
 def download_incident_report(
     incident_id: uuid.UUID,
+    access: Access,
     session: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-    authorization: Annotated[str | None, Header()] = None,
 ) -> HTMLResponse:
+    workspace_incident_or_404(session, incident_id, access)
     try:
-        resolve_actor(settings, authorization)
-        html_doc, filename = build_incident_report(session, incident_id)
-    except AnalystAuthError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        html_doc, filename = build_incident_report(
+            session, incident_id, workspace_id=access.workspace_id
+        )
     except ReportError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     return HTMLResponse(
@@ -148,9 +155,12 @@ def download_incident_report(
 @router.get("/{incident_id}", response_model=IncidentRead, summary="Get incident details")
 def get_incident(
     incident_id: uuid.UUID,
+    principal: CurrentUser,
     session: Session = Depends(get_db),
 ) -> IncidentRead:
-    incident = incident_service.get_incident(session, incident_id)
+    incident = incident_service.get_incident(
+        session, incident_id, workspace_id=principal.workspace_id
+    )
     if incident is None:
         raise HTTPException(status_code=404, detail="Incident not found")
     return _to_read(incident, include_actions=True)

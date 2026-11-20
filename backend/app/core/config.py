@@ -64,11 +64,26 @@ class Settings(BaseSettings):
     analyst_api_token: str | None = Field(
         default=None,
         description=(
-            "Shared bearer token for approve/reject. Empty is allowed in development/test "
-            "(actor=unverified) and refused in production. A valid token identifies the "
-            "generic actor 'analyst', not a specific person."
+            "Shared machine-to-machine bearer token for approve/reject, audit reads, and "
+            "report download when no user session is present. Empty is allowed in "
+            "development/test (actor=unverified) and refused in production. A valid token "
+            "identifies the generic actor 'analyst', not a specific person."
         ),
     )
+    session_ttl_seconds: int = Field(default=12 * 60 * 60, ge=60, le=60 * 60 * 24 * 30)
+    smtp_url: str | None = Field(
+        default=None,
+        description="SMTP URL for password recovery delivery. Unset means no mail provider.",
+    )
+
+    @field_validator("smtp_url", mode="before")
+    @classmethod
+    def blank_smtp_url_is_none(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @property
     def seeded_suspicious_ips(self) -> set[str]:

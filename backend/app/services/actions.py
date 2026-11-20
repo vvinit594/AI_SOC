@@ -46,16 +46,25 @@ def decide_action(
     action_id: uuid.UUID,
     decision: str,
     authorization: str | None,
+    *,
+    actor: str | None = None,
+    workspace_id: uuid.UUID | None = None,
 ) -> ActionDecisionResponse:
     if decision not in _DECIDED:
         raise ActionError("Unsupported action decision", status_code=400)
-    try:
-        actor = resolve_actor(settings, authorization)
-    except AnalystAuthError as exc:
-        raise ActionError(exc.detail, status_code=exc.status_code) from exc
+    if actor is None:
+        try:
+            actor = resolve_actor(settings, authorization)
+        except AnalystAuthError as exc:
+            raise ActionError(exc.detail, status_code=exc.status_code) from exc
 
     action = session.get(ResponseAction, action_id)
     if action is None:
+        raise ActionError("Action not found", status_code=404)
+    incident = session.get(Incident, action.incident_id)
+    if incident is None:
+        raise ActionError("Action not found", status_code=404)
+    if workspace_id is not None and incident.workspace_id != workspace_id:
         raise ActionError("Action not found", status_code=404)
 
     with lock_incident(session, action.incident_id):

@@ -13,12 +13,13 @@ def _event_ids(incident: Incident) -> list[uuid.UUID]:
 def list_incidents(
     session: Session,
     *,
+    workspace_id: uuid.UUID,
     status: str | None = None,
     severity: str | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> tuple[list[Incident], int]:
-    filters = []
+    filters = [Incident.workspace_id == workspace_id]
     if status:
         filters.append(Incident.status == status)
     if severity:
@@ -38,14 +39,22 @@ def list_incidents(
     return items, total
 
 
-def get_incident(session: Session, incident_id: uuid.UUID) -> Incident | None:
+def get_incident(
+    session: Session,
+    incident_id: uuid.UUID,
+    *,
+    workspace_id: uuid.UUID | None = None,
+) -> Incident | None:
+    filters = [Incident.id == incident_id]
+    if workspace_id is not None:
+        filters.append(Incident.workspace_id == workspace_id)
     return session.scalar(
         select(Incident)
         .options(
             selectinload(Incident.event_links),
             selectinload(Incident.response_actions),
         )
-        .where(Incident.id == incident_id)
+        .where(*filters)
     )
 
 

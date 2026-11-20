@@ -67,7 +67,9 @@ This document lists every environment variable the AI-SOC application reads, whe
 
 | Variable | Required | Default | Secret | Description |
 |----------|----------|---------|--------|-------------|
-| `ANALYST_API_TOKEN` | production: yes | empty (`None`) | **yes** | Shared bearer token for `POST /api/actions/{id}/approve`, `/reject`, `GET /api/incidents/{id}/audit-logs`, and `GET /api/incidents/{id}/report`. See behavior below. Not used for per-user identity. |
+| `ANALYST_API_TOKEN` | production: yes (machine-to-machine only) | empty (`None`) | **yes** | Shared bearer token used only when no user session is present, for approve/reject, audit reads, and report download. Human UI uses cookie sessions. |
+| `SESSION_TTL_SECONDS` | no | `43200` (12h) | no | Lifetime of opaque server-side sessions and auth cookies. |
+| `SMTP_URL` | production recovery: yes | empty (`None`) | **yes** | Mail delivery for password recovery. Unset in production returns HTTP 503 without claiming an email was sent. Development may return a one-time recovery token. |
 | `AISOC_POSTGRES_TEST_URL` | no | unset | **yes** | Optional disposable PostgreSQL URL for integration tests. Must not be the live `aisoc` database. When unset, tests may create `aisoc_phase5_verify` / `aisoc_phase9_verify` on a local cluster. |
 | `RATE_LIMIT_INVESTIGATE_PER_MINUTE` | no | `5` | no | Rate limit for `POST /api/incidents/{id}/investigate`. **Not implemented.** |
 | `RATE_LIMIT_UPLOAD_PER_MINUTE` | no | `10` | no | Rate limit for `POST /api/logs/upload`. **Not implemented.** |
