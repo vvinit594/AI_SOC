@@ -27,7 +27,7 @@ def search_incident_events(session: Session, incident_id: uuid.UUID) -> list[dic
     events: list[SecurityEvent] = []
     for event_id in event_ids:
         event = session.get(SecurityEvent, event_id)
-        if event is not None:
+        if event is not None and event.workspace_id == incident.workspace_id:
             events.append(event)
     events.sort(key=lambda item: (item.timestamp, item.id))
     return [_event_payload(event) for event in events]

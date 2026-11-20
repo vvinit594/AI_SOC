@@ -33,9 +33,7 @@ async def upload_logs(
     try:
         fmt = detect_format(file.filename, file.content_type)
         records = parse_upload_bytes(payload, fmt)
-        return ingest_records(
-            session, records, settings, workspace_id=principal.workspace_id
-        )
+        return ingest_records(session, records, settings, workspace_id=principal.workspace_id)
     except IngestFileError as exc:
         if exc.errors:
             return JSONResponse(

@@ -17,9 +17,7 @@ from app.services.workspaces import ensure_legacy_workspace
 logger = logging.getLogger(__name__)
 
 
-def seed_demo_data(
-    session: Session, *, workspace_id: uuid.UUID | None = None
-) -> dict[str, int]:
+def seed_demo_data(session: Session, *, workspace_id: uuid.UUID | None = None) -> dict[str, int]:
     events = demo_events()
     incidents = demo_incidents()
     target_workspace = workspace_id or ensure_legacy_workspace(session).id

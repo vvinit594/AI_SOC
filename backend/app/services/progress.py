@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.agents.nodes import NODE_NAMES
 from app.core.time import utc_now
-from app.db.models import AgentRun
+from app.db.models import AgentRun, Incident
 from app.schemas.investigations import InvestigationProgressEvent
 
 logger = logging.getLogger(__name__)
@@ -139,13 +139,20 @@ def events_from_runs(
 
 
 def load_progress_events(
-    session: Session, investigation_id: uuid.UUID
+    session: Session,
+    investigation_id: uuid.UUID,
+    *,
+    workspace_id: uuid.UUID | None = None,
 ) -> list[InvestigationProgressEvent] | None:
     rows = list(
         session.scalars(select(AgentRun).where(AgentRun.investigation_id == investigation_id)).all()
     )
     if not rows:
         return None
+    if workspace_id is not None:
+        incident = session.get(Incident, rows[0].incident_id)
+        if incident is None or incident.workspace_id != workspace_id:
+            return None
     return events_from_runs(investigation_id, rows)
 
 
@@ -170,8 +177,10 @@ def iter_sse_events(
     session_factory: sessionmaker[Session],
     investigation_id: uuid.UUID,
     *,
+    workspace_id: uuid.UUID | None = None,
     last_event_id: str | None = None,
     should_stop: Callable[[], bool] | None = None,
+    authorize: Callable[[Session], bool] | None = None,
 ) -> Iterator[str]:
     """Yield SSE chunks. Opens a short-lived session per snapshot; never holds a transaction."""
     emitted: set[str] = set()
@@ -186,7 +195,9 @@ def iter_sse_events(
                 return
             session = session_factory()
             try:
-                events = load_progress_events(session, investigation_id)
+                if authorize is not None and not authorize(session):
+                    return
+                events = load_progress_events(session, investigation_id, workspace_id=workspace_id)
             finally:
                 session.close()
             if events is None:

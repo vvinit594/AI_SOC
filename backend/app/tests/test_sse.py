@@ -59,6 +59,33 @@ def test_sse_unknown_investigation_404(client: TestClient) -> None:
     assert "not found" in response.json()["detail"].lower()
 
 
+def test_sse_generator_stops_when_workspace_or_session_check_fails(client: TestClient) -> None:
+    incident_id = _open_incident(client)
+    created = client.post(f"/api/incidents/{incident_id}/investigate")
+    assert created.status_code == 200, created.text
+    investigation_id = uuid.UUID(created.json()["investigation"]["id"])
+    factory = client.app.state.session_factory
+    denied = "".join(
+        progress.iter_sse_events(
+            factory,
+            investigation_id,
+            workspace_id=uuid.uuid4(),
+        )
+    )
+    assert "node_started" not in denied
+    assert "investigation_completed" not in denied
+    revoked = "".join(
+        progress.iter_sse_events(
+            factory,
+            investigation_id,
+            workspace_id=uuid.UUID(client.get("/api/auth/me").json()["workspace"]["id"]),
+            authorize=lambda _session: False,
+        )
+    )
+    assert "node_started" not in revoked
+    assert "investigation_completed" not in revoked
+
+
 def test_sse_replays_completed_investigation(client: TestClient) -> None:
     incident_id = _open_incident(client)
     created = client.post(f"/api/incidents/{incident_id}/investigate")

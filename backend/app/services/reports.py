@@ -156,7 +156,10 @@ def _load_events(session: Session, incident: Incident) -> list[SecurityEvent]:
     return list(
         session.scalars(
             select(SecurityEvent)
-            .where(SecurityEvent.id.in_(event_ids))
+            .where(
+                SecurityEvent.id.in_(event_ids),
+                SecurityEvent.workspace_id == incident.workspace_id,
+            )
             .order_by(SecurityEvent.timestamp.asc(), SecurityEvent.id.asc())
         ).all()
     )

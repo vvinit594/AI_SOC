@@ -3,9 +3,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser
+from app.core.security_constants import SESSION_COOKIE_NAME
+from app.core.time import utc_now
+from app.core.tokens import hash_token
+from app.db.models import UserSession
 from app.db.session import get_db
 from app.schemas.common import ErrorResponse
 from app.schemas.investigations import InvestigationRead
@@ -27,9 +32,7 @@ def read_investigation(
     principal: CurrentUser,
     session: Session = Depends(get_db),
 ) -> InvestigationRead:
-    loaded = get_investigation(
-        session, investigation_id, workspace_id=principal.workspace_id
-    )
+    loaded = get_investigation(session, investigation_id, workspace_id=principal.workspace_id)
     if loaded is None:
         raise HTTPException(status_code=404, detail="Investigation not found")
     return loaded
@@ -49,19 +52,35 @@ def stream_investigation(
     factory = request.app.state.session_factory
     session = factory()
     try:
-        loaded = get_investigation(
-            session, investigation_id, workspace_id=principal.workspace_id
-        )
+        loaded = get_investigation(session, investigation_id, workspace_id=principal.workspace_id)
     finally:
         session.close()
     if loaded is None:
         raise HTTPException(status_code=404, detail="Investigation not found")
 
+    session_token = request.cookies.get(SESSION_COOKIE_NAME)
+    expected_workspace = principal.workspace_id
+
+    def _stream_still_authorized(db: Session) -> bool:
+        if not session_token or expected_workspace is None:
+            return False
+        row = db.scalar(
+            select(UserSession).where(UserSession.token_hash == hash_token(session_token))
+        )
+        return (
+            row is not None
+            and row.revoked_at is None
+            and row.expires_at > utc_now()
+            and row.workspace_id == expected_workspace
+        )
+
     def chunks():
         yield from iter_sse_events(
             factory,
             investigation_id,
+            workspace_id=expected_workspace,
             last_event_id=last_event_id,
+            authorize=_stream_still_authorized,
         )
 
     return StreamingResponse(

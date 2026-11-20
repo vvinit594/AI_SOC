@@ -11,6 +11,7 @@ from app.core.security_constants import (
     LEGACY_WORKSPACE_ID,
     LOGIN_MAX_FAILURES_PER_EMAIL_IP,
     SESSION_COOKIE_NAME,
+    SESSION_TTL_SECONDS_DEFAULT,
 )
 from app.core.time import utc_now
 from app.db.base import Base
@@ -87,12 +88,22 @@ def test_register_rejects_invalid_email(anonymous_client: TestClient) -> None:
 
 
 def test_register_rejects_weak_password(anonymous_client: TestClient) -> None:
-    response = anonymous_client.post(
+    too_short = anonymous_client.post(
         "/api/auth/register",
         json={"full_name": "Ada", "email": "weak@example.com", "password": "short"},
     )
-    assert response.status_code == 422
-    assert "12" in response.json()["detail"]
+    letters_only = anonymous_client.post(
+        "/api/auth/register",
+        json={
+            "full_name": "Ada",
+            "email": "letters-only@example.com",
+            "password": "CorrectHorseBattery",
+        },
+    )
+    assert too_short.status_code == 422
+    assert "12" in too_short.json()["detail"]
+    assert letters_only.status_code == 422
+    assert "letters and numbers" in letters_only.json()["detail"].lower()
 
 
 def test_login_success_and_invalid_are_generic(application) -> None:
@@ -139,6 +150,7 @@ def test_session_cookie_flags_are_httponly_samesite_lax(application) -> None:
         assert "httponly" not in csrf_header.lower()
         assert "samesite=lax" in csrf_header.lower()
         assert "secure" not in session_header.lower()
+        assert f"max-age={SESSION_TTL_SECONDS_DEFAULT}" in session_header.lower()
 
 
 def test_logout_invalidates_session(client: TestClient) -> None:
@@ -210,8 +222,12 @@ def test_unauthenticated_tenant_routes_are_rejected(anonymous_client: TestClient
 
 
 def test_cross_workspace_event_incident_and_report_are_hidden(application) -> None:
+    from app.services.progress import load_progress_events
+    from app.tests.test_actions import _insert_proposed
+    from app.tests.test_investigations import _open_incident
+
     with CookieClient(application) as client:
-        register_user(client, email="owner-a@example.com")
+        owner_a = register_user(client, email="owner-a@example.com")
         loaded = client.post("/api/scenarios/A/load")
         assert loaded.status_code == 200
         detected = client.post("/api/incidents/detect")
@@ -224,6 +240,12 @@ def test_cross_workspace_event_incident_and_report_are_hidden(application) -> No
         incident_id = incidents["items"][0]["id"]
         report = client.get(f"/api/incidents/{incident_id}/report")
         assert report.status_code == 200
+        investigate = client.post(f"/api/incidents/{_open_incident(client)}/investigate")
+        assert investigate.status_code == 200, investigate.text
+        investigation_id = investigate.json()["investigation"]["id"]
+        assert client.get(f"/api/investigations/{investigation_id}").status_code == 200
+        _, action_id = _insert_proposed(client)
+        sibling_incident_id, reject_action_id = _insert_proposed(client)
 
         register_user(client, email="owner-b@example.com")
         assert client.get("/api/events").json()["total"] == 0
@@ -231,8 +253,37 @@ def test_cross_workspace_event_incident_and_report_are_hidden(application) -> No
         assert client.get(f"/api/incidents/{incident_id}").status_code == 404
         assert client.get(f"/api/incidents/{incident_id}/report").status_code == 404
         assert client.get(f"/api/incidents/{incident_id}/audit-logs").status_code == 404
+        assert client.post(f"/api/incidents/{incident_id}/investigate").status_code == 404
         listed_ids = {item["id"] for item in client.get("/api/events").json()["items"]}
         assert event_id not in listed_ids
+        supplied_workspace = client.get(f"/api/events?workspace_id={owner_a['workspace']['id']}")
+        assert supplied_workspace.status_code == 200
+        assert supplied_workspace.json()["total"] == 0
+        assert client.get(f"/api/investigations/{investigation_id}").status_code == 404
+        stream = client.get(f"/api/investigations/{investigation_id}/stream")
+        assert stream.status_code == 404
+        assert "not found" in stream.json()["detail"].lower()
+        assert client.post(f"/api/actions/{action_id}/approve").status_code == 404
+        assert client.post(f"/api/actions/{reject_action_id}/reject").status_code == 404
+        assert client.get(f"/api/incidents/{sibling_incident_id}").status_code == 404
+
+        session = client.app.state.session_factory()
+        try:
+            owner_b_workspace = uuid.UUID(client.get("/api/auth/me").json()["workspace"]["id"])
+            leaked = load_progress_events(
+                session,
+                uuid.UUID(investigation_id),
+                workspace_id=owner_b_workspace,
+            )
+            own = load_progress_events(
+                session,
+                uuid.UUID(investigation_id),
+                workspace_id=uuid.UUID(owner_a["workspace"]["id"]),
+            )
+        finally:
+            session.close()
+        assert leaked is None
+        assert own is not None
 
 
 def test_audit_actor_is_authenticated_user(client: TestClient) -> None:
@@ -295,6 +346,63 @@ def test_password_recovery_production_requires_delivery_config() -> None:
         response = client.post("/api/auth/forgot-password", json={"email": "anyone@example.com"})
         assert response.status_code == 503
         assert "not configured" in response.json()["detail"].lower()
+
+
+def test_password_recovery_smtp_url_is_not_implemented() -> None:
+    settings = build_settings(
+        app_env="production",
+        analyst_api_token="prod-token-not-used",
+        smtp_url="smtp://localhost:25",
+    )
+    application = create_app(settings)
+    Base.metadata.create_all(application.state.engine)
+    with TestClient(application) as client:
+        response = client.post("/api/auth/forgot-password", json={"email": "anyone@example.com"})
+        assert response.status_code == 503
+        assert "not implemented" in response.json()["detail"].lower()
+
+
+def test_login_rotates_and_revokes_previous_session(application) -> None:
+    with CookieClient(application) as client:
+        register_user(client, email="rotate@example.com")
+        previous = client.cookies.get(SESSION_COOKIE_NAME)
+        assert previous
+        login = client.post(
+            "/api/auth/login",
+            json={"email": "rotate@example.com", "password": DEFAULT_TEST_PASSWORD},
+        )
+        assert login.status_code == 200
+        current = client.cookies.get(SESSION_COOKIE_NAME)
+        assert current
+        assert current != previous
+        raw = TestClient(client.app)
+        raw.cookies.set(SESSION_COOKIE_NAME, previous)
+        assert raw.get("/api/auth/me").status_code == 401
+        assert client.get("/api/auth/me").status_code == 200
+
+
+def test_production_session_cookie_is_secure() -> None:
+    settings = build_settings(app_env="production", analyst_api_token="prod-token-not-used")
+    application = create_app(settings)
+    Base.metadata.create_all(application.state.engine)
+    with CookieClient(application) as client:
+        response = client.post(
+            "/api/auth/register",
+            json={
+                "full_name": "Prod",
+                "email": "prod-cookie@example.com",
+                "password": DEFAULT_TEST_PASSWORD,
+            },
+        )
+        assert response.status_code == 201
+        session_header = next(
+            item
+            for item in response.headers.get_list("set-cookie")
+            if item.startswith(f"{SESSION_COOKIE_NAME}=")
+        )
+        assert "secure" in session_header.lower()
+        assert "httponly" in session_header.lower()
+        assert "samesite=lax" in session_header.lower()
 
 
 def test_session_persists_across_requests(client: TestClient) -> None:
