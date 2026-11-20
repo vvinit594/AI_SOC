@@ -12,6 +12,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { StartInvestigationButton } from "@/components/incidents/start-investigation-button";
 import { ApiError, getIncidentApi } from "@/lib/api";
 import { analystErrorMessage } from "@/lib/analyst-errors";
 import { isAbortError } from "@/lib/analyst-proxy";
@@ -98,7 +99,14 @@ export function IncidentDetailClient({ incidentId }: { incidentId: string }) {
         title={title}
         description={summary}
         actions={
-          mock ? (
+          incident ? (
+            <StartInvestigationButton
+              incidentId={incident.id}
+              label="Investigate Incident"
+              variant="default"
+              size="default"
+            />
+          ) : mock ? (
             <Link
               href={`/investigations/${mock.investigationId}`}
               className={cn(buttonVariants())}

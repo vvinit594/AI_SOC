@@ -12,22 +12,35 @@ export function BackendStatus() {
   const [label, setLabel] = useState("Checking backend…");
 
   useEffect(() => {
-    const controller = new AbortController();
+    let cancelled = false;
 
-    getHealth(controller.signal)
-      .then((health) => {
-        setStatus("connected");
-        setLabel(`Backend connected · ${health.service} v${health.version}`);
-      })
-      .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === "AbortError") {
-          return;
-        }
-        setStatus("disconnected");
-        setLabel("Backend not connected");
-      });
+    const check = () => {
+      getHealth()
+        .then((health) => {
+          if (cancelled) {
+            return;
+          }
+          setStatus("connected");
+          setLabel(`Backend connected · ${health.service} v${health.version}`);
+        })
+        .catch((error: unknown) => {
+          if (cancelled) {
+            return;
+          }
+          if (error instanceof DOMException && error.name === "AbortError") {
+            return;
+          }
+          setStatus("disconnected");
+          setLabel("Backend not connected");
+        });
+    };
 
-    return () => controller.abort();
+    check();
+    const timer = window.setInterval(check, 8000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, []);
 
   return (

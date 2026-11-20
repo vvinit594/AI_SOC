@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Search, Upload } from "lucide-react";
 
 import { LoadDemoDialog } from "@/components/dashboard/load-demo-dialog";
@@ -22,6 +22,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { listEventsApi } from "@/lib/api";
+import { analystErrorMessage } from "@/lib/analyst-errors";
+import { isAbortError } from "@/lib/analyst-proxy";
 import { formatUtc, shortId } from "@/lib/format";
 import type { DemoScenario, SecurityEvent } from "@/lib/types";
 
@@ -33,10 +36,28 @@ const EVENT_TYPES = [
   "admin_task",
 ] as const;
 
-export function EventsExplorer({ events }: { events: SecurityEvent[] }) {
+export function EventsExplorer({ events: initialEvents }: { events?: SecurityEvent[] }) {
+  const [events, setEvents] = useState<SecurityEvent[]>(initialEvents ?? []);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [eventType, setEventType] = useState<string>("all");
   const [scenario, setScenario] = useState<string>("all");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    listEventsApi(controller.signal)
+      .then((rows) => {
+        setEvents(rows);
+        setLoadError(null);
+      })
+      .catch((caught: unknown) => {
+        if (isAbortError(caught)) {
+          return;
+        }
+        setLoadError(analystErrorMessage(caught));
+      });
+    return () => controller.abort();
+  }, []);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -75,8 +96,8 @@ export function EventsExplorer({ events }: { events: SecurityEvent[] }) {
             Log ingest
           </CardTitle>
           <CardDescription>
-            JSON/CSV upload and parsing land in Phase 5. Use a built-in scenario
-            for now — files are not sent anywhere in this phase.
+            Built-in scenarios POST to FastAPI, persist events in PostgreSQL, then run
+            detection. File upload remains available on the API.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap items-center gap-3">
@@ -128,6 +149,11 @@ export function EventsExplorer({ events }: { events: SecurityEvent[] }) {
         </Select>
       </div>
 
+      {loadError ? (
+        <p className="text-sm text-destructive" role="alert">
+          {loadError}
+        </p>
+      ) : null}
       <p className="text-sm text-muted-foreground">
         Showing {filtered.length} of {events.length} events
       </p>

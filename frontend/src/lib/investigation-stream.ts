@@ -1,6 +1,25 @@
 import { API_BASE_URL } from "@/lib/constants";
 import type { AgentName, AgentRun, AgentRunStatus } from "@/lib/types";
 
+const AGENT_ORDER: AgentName[] = [
+  "investigation",
+  "threat_intelligence",
+  "analysis",
+  "response_planner",
+];
+
+export function emptyAgentRun(agent: AgentName): AgentRun {
+  return {
+    agent,
+    status: "queued",
+    finding: "",
+    evidenceEventIds: [],
+    confidence: "low",
+    reasoningSummary: "",
+    recommendedNextStep: "",
+  };
+}
+
 export type StreamEventName =
   | "connected"
   | "node_started"
@@ -91,8 +110,10 @@ function asString(value: unknown, fallback: string): string {
 
 export function mergeApiNodes(agents: AgentRun[], nodes: InvestigationApiNode[]): AgentRun[] {
   const byName = new Map(nodes.map((node) => [node.agent_name, node]));
-  return agents.map((agent) => {
-    const node = byName.get(agent.agent);
+  const existing = new Map(agents.map((agent) => [agent.agent, agent]));
+  return AGENT_ORDER.map((name) => {
+    const agent = existing.get(name) ?? emptyAgentRun(name);
+    const node = byName.get(name);
     if (!node) {
       return agent;
     }

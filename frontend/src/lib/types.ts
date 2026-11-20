@@ -43,7 +43,7 @@ export type SecurityEvent = {
   action?: string;
   source: string;
   rawMessage: string;
-  scenario: DemoScenario;
+  scenario: DemoScenario | string;
 };
 
 export type SeverityReason = {

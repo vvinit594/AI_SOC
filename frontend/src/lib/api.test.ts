@@ -4,7 +4,9 @@ import {
   approveAction,
   downloadIncidentReport,
   getIncidentApi,
+  listEventsApi,
   listIncidentAuditLogs,
+  listIncidentSummaries,
   listIncidentsApi,
   rejectAction,
 } from "@/lib/api";
@@ -59,6 +61,46 @@ describe("response and report API client", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it("loads incident summaries from the list endpoint only", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse(200, { items: [incidentPayload], total: 1 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const incidents = await listIncidentSummaries();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(incidents).toHaveLength(1);
+    expect(incidents[0]?.title).toBe("Brute-force login");
+  });
+
+  it("maps persisted events without filling missing threat intel", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        total: 1,
+        items: [
+          {
+            id: "e0a10001-0001-4a11-8c01-000000000001",
+            timestamp: "2026-10-21T10:15:00Z",
+            event_type: "login_failure",
+            source_ip: "192.0.2.10",
+            destination_ip: null,
+            username: "demo_user",
+            hostname: "demo-server-01",
+            action: "authentication_failed",
+            source: "linux_auth",
+            raw_message: "Failed password",
+            scenario: "A",
+            created_at: "2026-10-21T10:15:00Z",
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const events = await listEventsApi();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(`${API_BASE_URL}/api/events?limit=500`);
+    expect(events[0]?.eventType).toBe("login_failure");
+    expect(events[0]?.destinationIp).toBeUndefined();
   });
 
   it("loads incidents from the persisted list and detail endpoints", async () => {

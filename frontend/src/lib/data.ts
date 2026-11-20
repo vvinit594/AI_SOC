@@ -78,6 +78,22 @@ export function getMetrics(): DashboardMetrics {
   return mockMetrics;
 }
 
+const OPEN_STATUSES = new Set(["open", "investigating", "awaiting_approval"]);
+
+export function metricsFromIncidents(
+  incidents: Array<{ severity: string; status: string }>,
+): DashboardMetrics {
+  return {
+    totalIncidents: incidents.length,
+    openIncidents: incidents.filter((incident) => OPEN_STATUSES.has(incident.status)).length,
+    criticalAndHigh: incidents.filter(
+      (incident) => incident.severity === "critical" || incident.severity === "high",
+    ).length,
+    awaitingApproval: incidents.filter((incident) => incident.status === "awaiting_approval")
+      .length,
+  };
+}
+
 export function getScenarioMeta(scenario: DemoScenario) {
   return SCENARIO_META[scenario];
 }

@@ -9,7 +9,7 @@ import {
   Tooltip,
 } from "recharts";
 
-import type { Incident, Severity } from "@/lib/types";
+import type { Severity } from "@/lib/types";
 
 const SEVERITY_ORDER: Severity[] = ["critical", "high", "medium", "low"];
 
@@ -20,7 +20,7 @@ const SEVERITY_COLOR: Record<Severity, string> = {
   low: "var(--severity-low)",
 };
 
-export function IncidentChart({ incidents }: { incidents: Incident[] }) {
+export function IncidentChart({ incidents }: { incidents: Array<{ severity: Severity }> }) {
   const data = SEVERITY_ORDER.map((severity) => ({
     name: severity,
     value: incidents.filter((incident) => incident.severity === severity).length,

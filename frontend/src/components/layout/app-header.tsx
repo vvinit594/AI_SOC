@@ -47,11 +47,11 @@ export function AppHeader() {
       <div className="min-w-0 flex-1">
         <h1 className="truncate font-heading text-sm font-medium">{pageTitle(pathname)}</h1>
         <p className="hidden text-xs text-muted-foreground sm:block">
-          Agentic threat investigation — incident records are still mock data
+          Agentic threat investigation — incidents load from FastAPI and PostgreSQL
         </p>
       </div>
       <Badge variant="outline" className="hidden sm:inline-flex">
-        Mock data
+        Live API
       </Badge>
       <BackendStatus />
     </header>

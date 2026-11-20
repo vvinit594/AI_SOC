@@ -106,4 +106,25 @@ describe("investigation stream reducer", () => {
     expect(merged[0]?.finding).toBe("Loaded 13 evidence events.");
     expect(merged[1]?.finding).toBe("");
   });
+
+  it("creates queued agent rows when the live payload has no snapshot", () => {
+    const merged = mergeApiNodes([], [
+      {
+        agent_name: "analysis",
+        status: "running",
+        started_at: "2026-10-23T12:00:00Z",
+        completed_at: null,
+        structured_output: {},
+        error: null,
+      },
+    ]);
+    expect(merged.map((agent) => agent.agent)).toEqual([
+      "investigation",
+      "threat_intelligence",
+      "analysis",
+      "response_planner",
+    ]);
+    expect(merged[2]?.status).toBe("running");
+    expect(merged[2]?.finding).toBe("");
+  });
 });

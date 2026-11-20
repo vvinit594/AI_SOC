@@ -9,7 +9,14 @@ import {
 import { analystProxyUrl, isAbortError } from "@/lib/analyst-proxy";
 import { API_BASE_URL } from "@/lib/constants";
 import { isHtmlContentType, safeReportFilename } from "@/lib/report";
-import type { AgentName, AgentRunStatus, AuditLogEntry, PersistedIncident } from "@/lib/types";
+import type {
+  AgentName,
+  AgentRunStatus,
+  AuditLogEntry,
+  DemoScenario,
+  PersistedIncident,
+  SecurityEvent,
+} from "@/lib/types";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -126,12 +133,97 @@ export function getInvestigationApi(
   );
 }
 
+export async function listIncidentSummaries(
+  signal?: AbortSignal,
+): Promise<PersistedIncident[]> {
+  const listed = await apiGet<IncidentListApi>("/api/incidents", signal);
+  return listed.items.map(mapIncident);
+}
+
 export async function listIncidentsApi(signal?: AbortSignal): Promise<PersistedIncident[]> {
   const listed = await apiGet<IncidentListApi>("/api/incidents", signal);
   const detailed = await Promise.all(
     listed.items.map((item) => apiGet<IncidentApiItem>(`/api/incidents/${item.id}`, signal)),
   );
   return detailed.map(mapIncident);
+}
+
+export type SecurityEventApiItem = {
+  id: string;
+  timestamp: string;
+  event_type: string;
+  source_ip: string | null;
+  destination_ip: string | null;
+  username: string | null;
+  hostname: string | null;
+  action: string | null;
+  source: string;
+  raw_message: string;
+  scenario: string | null;
+};
+
+export type EventListApi = {
+  items: SecurityEventApiItem[];
+  total: number;
+};
+
+export function mapSecurityEvent(row: SecurityEventApiItem): SecurityEvent {
+  return {
+    id: row.id,
+    timestamp: row.timestamp,
+    eventType: row.event_type,
+    sourceIp: row.source_ip ?? undefined,
+    destinationIp: row.destination_ip ?? undefined,
+    username: row.username ?? undefined,
+    hostname: row.hostname ?? undefined,
+    action: row.action ?? undefined,
+    source: row.source,
+    rawMessage: row.raw_message,
+    scenario: row.scenario ?? "",
+  };
+}
+
+export async function listEventsApi(signal?: AbortSignal): Promise<SecurityEvent[]> {
+  const listed = await apiGet<EventListApi>("/api/events?limit=500", signal);
+  return listed.items.map(mapSecurityEvent);
+}
+
+export type ScenarioLoadApi = {
+  scenario: DemoScenario;
+  accepted: number;
+  event_ids: string[];
+};
+
+export function loadDemoScenario(
+  scenario: DemoScenario,
+  signal?: AbortSignal,
+): Promise<ScenarioLoadApi> {
+  return apiPost<ScenarioLoadApi>(`/api/scenarios/${scenario}/load`, signal);
+}
+
+export type DetectIncidentsApi = {
+  created: number;
+  updated: number;
+  skipped: number;
+};
+
+export function detectIncidents(signal?: AbortSignal): Promise<DetectIncidentsApi> {
+  return apiPost<DetectIncidentsApi>("/api/incidents/detect", signal);
+}
+
+export type InvestigateApiResponse = {
+  investigation: InvestigationApiResponse;
+  created: boolean;
+};
+
+export function startInvestigationApi(
+  incidentId: string,
+  signal?: AbortSignal,
+): Promise<InvestigateApiResponse> {
+  return apiPost<InvestigateApiResponse>(
+    `/api/incidents/${incidentId}/investigate`,
+    signal,
+  );
 }
 
 export async function getIncidentApi(
