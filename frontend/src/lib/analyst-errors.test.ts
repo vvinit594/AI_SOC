@@ -32,6 +32,9 @@ describe("analyst error mapping", () => {
     expect(analystErrorMessage(new ApiError("down", 0, "network_error"))).toContain(
       "Unable to reach the API",
     );
+    expect(
+      analystErrorMessage(new ApiError("Upload exceeds MAX_UPLOAD_SIZE_MB", 413, "http_error")),
+    ).toContain("MAX_UPLOAD_SIZE_MB");
   });
 
   it("blocks duplicate in-flight work", () => {

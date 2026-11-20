@@ -2,13 +2,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   approveAction,
+  detectIncidents,
   downloadIncidentReport,
   getIncidentApi,
+  IngestApiError,
   listEventsApi,
+  listEventsPage,
   listIncidentAuditLogs,
   listIncidentSummaries,
   listIncidentsApi,
   rejectAction,
+  uploadLogs,
 } from "@/lib/api";
 import { API_BASE_URL } from "@/lib/constants";
 
@@ -98,9 +102,25 @@ describe("response and report API client", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
     const events = await listEventsApi();
-    expect(fetchMock.mock.calls[0]?.[0]).toBe(`${API_BASE_URL}/api/events?limit=500`);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      `${API_BASE_URL}/api/events?limit=500&offset=0`,
+    );
     expect(events[0]?.eventType).toBe("login_failure");
     expect(events[0]?.destinationIp).toBeUndefined();
+  });
+
+  it("pages events with limit and offset from the existing list API", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse(200, { items: [], total: 28 })),
+    );
+    const page = await listEventsPage({ limit: 50, offset: 50, eventType: "login_failure", scenario: "A" });
+    expect(page.total).toBe(28);
+    const called = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
+    expect(called).toContain("limit=50");
+    expect(called).toContain("offset=50");
+    expect(called).toContain("event_type=login_failure");
+    expect(called).toContain("scenario=A");
   });
 
   it("loads incidents from the persisted list and detail endpoints", async () => {
@@ -288,5 +308,183 @@ describe("response and report API client", () => {
     vi.stubGlobal("fetch", fetchMock);
     await getIncidentApi(INCIDENT_ID);
     expect(fetchMock.mock.calls[0]?.[0]).toBe(`${API_BASE_URL}/api/incidents/${INCIDENT_ID}`);
+  });
+});
+
+describe("log upload and detection client", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("posts JSON as multipart field file", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, { accepted: 1, rejected: 0, event_ids: ["e1"], errors: [] }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const file = new File([JSON.stringify([{ timestamp: "2026-10-21T12:00:00Z" }])], "events.json", {
+      type: "application/json",
+    });
+    const result = await uploadLogs(file);
+    expect(result.accepted).toBe(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(`${API_BASE_URL}/api/logs/upload`);
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init.method).toBe("POST");
+    expect(init.body).toBeInstanceOf(FormData);
+    expect((init.body as FormData).get("file")).toBeInstanceOf(File);
+    expect(init.headers).toEqual({ Accept: "application/json" });
+  });
+
+  it("posts CSV as multipart field file", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse(200, { accepted: 1, rejected: 0, event_ids: ["e2"], errors: [] }),
+      ),
+    );
+    const file = new File(["timestamp,event_type\n2026-10-21T12:00:00Z,login_success\n"], "events.csv", {
+      type: "text/csv",
+    });
+    await expect(uploadLogs(file)).resolves.toMatchObject({ accepted: 1, rejected: 0 });
+  });
+
+  it("surfaces oversized uploads from the backend 413", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse(413, {
+          error: "http_error",
+          detail: "Upload exceeds MAX_UPLOAD_SIZE_MB",
+          code: "http_error",
+        }),
+      ),
+    );
+    const file = new File(["{}"], "events.json", { type: "application/json" });
+    await expect(uploadLogs(file)).rejects.toMatchObject({
+      status: 413,
+      message: "Upload exceeds MAX_UPLOAD_SIZE_MB",
+    });
+  });
+
+  it("returns partial ingestion without treating it as a hard failure", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse(200, {
+          accepted: 1,
+          rejected: 1,
+          event_ids: ["ok"],
+          errors: [{ index: 1, detail: "timestamp: Input should be a valid datetime" }],
+        }),
+      ),
+    );
+    const result = await uploadLogs(new File(["[]"], "events.json", { type: "application/json" }));
+    expect(result.accepted).toBe(1);
+    expect(result.rejected).toBe(1);
+    expect(result.errors[0]?.index).toBe(1);
+  });
+
+  it("keeps rejected record indexes when every row is invalid", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse(400, {
+          error: "ingest_error",
+          detail: "No valid events in upload",
+          code: "ingest_error",
+          errors: [{ index: 0, detail: "timestamp: Field required" }],
+        }),
+      ),
+    );
+    const caught = uploadLogs(new File(["[]"], "events.json", { type: "application/json" }));
+    await expect(caught).rejects.toBeInstanceOf(IngestApiError);
+    await expect(caught).rejects.toMatchObject({
+      status: 400,
+      errors: [{ index: 0, detail: "timestamp: Field required" }],
+    });
+  });
+
+  it("maps unsupported format failures from the backend", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse(400, {
+          error: "http_error",
+          detail: "Unsupported file type; upload JSON or CSV",
+          code: "http_error",
+        }),
+      ),
+    );
+    await expect(
+      uploadLogs(new File(["hello"], "events.txt", { type: "text/plain" })),
+    ).rejects.toMatchObject({
+      status: 400,
+      message: "Unsupported file type; upload JSON or CSV",
+    });
+  });
+
+  it("maps network failures on upload", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("failed to fetch")));
+    await expect(
+      uploadLogs(new File(["{}"], "events.json", { type: "application/json" })),
+    ).rejects.toMatchObject({ status: 0, code: "network_error" });
+  });
+
+  it("refreshes events from GET /api/events after a confirmed upload", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(200, { accepted: 1, rejected: 0, event_ids: ["e1"], errors: [] }),
+      )
+      .mockResolvedValueOnce(jsonResponse(200, { items: [], total: 1 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await uploadLogs(new File(["{}"], "events.json", { type: "application/json" }));
+    const page = await listEventsPage({ limit: 50, offset: 0 });
+    expect(page.total).toBe(1);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(`${API_BASE_URL}/api/events?limit=50&offset=0`);
+  });
+
+  it("posts detection only to POST /api/incidents/detect", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        matches: [
+          {
+            rule_id: "R1",
+            severity: "high",
+            event_ids: ["e1"],
+            reason: "threshold",
+            matched_threshold: "5",
+            timestamp: "2026-10-21T12:00:00Z",
+            incident_id: INCIDENT_ID,
+          },
+        ],
+        incidents: [incidentPayload],
+        created: 1,
+        updated: 0,
+        skipped: 0,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await detectIncidents();
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE_URL}/api/incidents/detect`,
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(result.created).toBe(1);
+    expect(result.incidents[0]?.id).toBe(INCIDENT_ID);
+    expect(result.matches[0]?.rule_id).toBe("R1");
+  });
+
+  it("maps detection failures", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse(500, { error: "http_error", detail: "Database unavailable", code: "http_error" }),
+      ),
+    );
+    await expect(detectIncidents()).rejects.toMatchObject({
+      status: 500,
+      message: "Database unavailable",
+    });
   });
 });

@@ -30,6 +30,21 @@ export class ApiError extends Error {
   }
 }
 
+export type RecordErrorApi = {
+  index: number;
+  detail: string;
+};
+
+export class IngestApiError extends ApiError {
+  readonly errors: RecordErrorApi[];
+
+  constructor(message: string, status: number, code: string, errors: RecordErrorApi[]) {
+    super(message, status, code);
+    this.name = "IngestApiError";
+    this.errors = errors;
+  }
+}
+
 export type HealthResponse = {
   status: "ok";
   service: string;
@@ -41,6 +56,7 @@ type ErrorBody = {
   error?: string;
   detail?: string;
   code?: string;
+  errors?: RecordErrorApi[];
 };
 
 function apiUrl(path: string): string {
@@ -167,6 +183,14 @@ export type EventListApi = {
   total: number;
 };
 
+export type ListEventsQuery = {
+  eventType?: string;
+  scenario?: string;
+  limit?: number;
+  offset?: number;
+  signal?: AbortSignal;
+};
+
 export function mapSecurityEvent(row: SecurityEventApiItem): SecurityEvent {
   return {
     id: row.id,
@@ -183,9 +207,83 @@ export function mapSecurityEvent(row: SecurityEventApiItem): SecurityEvent {
   };
 }
 
+export function eventsListPath(query: ListEventsQuery = {}): string {
+  const params = new URLSearchParams();
+  params.set("limit", String(query.limit ?? 50));
+  params.set("offset", String(query.offset ?? 0));
+  if (query.eventType && query.eventType !== "all") {
+    params.set("event_type", query.eventType);
+  }
+  if (query.scenario && query.scenario !== "all") {
+    params.set("scenario", query.scenario);
+  }
+  return `/api/events?${params.toString()}`;
+}
+
+export async function listEventsPage(
+  query: ListEventsQuery = {},
+): Promise<{ items: SecurityEvent[]; total: number }> {
+  const listed = await apiGet<EventListApi>(eventsListPath(query), query.signal);
+  return { items: listed.items.map(mapSecurityEvent), total: listed.total };
+}
+
 export async function listEventsApi(signal?: AbortSignal): Promise<SecurityEvent[]> {
-  const listed = await apiGet<EventListApi>("/api/events?limit=500", signal);
-  return listed.items.map(mapSecurityEvent);
+  const page = await listEventsPage({ limit: 500, offset: 0, signal });
+  return page.items;
+}
+
+export type LogUploadApi = {
+  accepted: number;
+  rejected: number;
+  event_ids: string[];
+  errors: RecordErrorApi[];
+};
+
+export async function uploadLogs(file: File, signal?: AbortSignal): Promise<LogUploadApi> {
+  const body = new FormData();
+  body.append("file", file, file.name);
+  let response: Response;
+  try {
+    response = await fetch(apiUrl("/api/logs/upload"), {
+      method: "POST",
+      headers: { Accept: "application/json" },
+      body,
+      signal,
+    });
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error;
+    }
+    throw new ApiError("Unable to reach the API", 0, "network_error");
+  }
+
+  const payload = await parseJson(response);
+  const errorBody = (payload ?? {}) as ErrorBody;
+  const recordErrors = Array.isArray(errorBody.errors) ? errorBody.errors : [];
+
+  if (!response.ok) {
+    if (recordErrors.length > 0) {
+      throw new IngestApiError(
+        errorBody.detail ?? `Request failed with status ${response.status}`,
+        response.status,
+        errorBody.code ?? "ingest_error",
+        recordErrors,
+      );
+    }
+    throw new ApiError(
+      errorBody.detail ?? `Request failed with status ${response.status}`,
+      response.status,
+      errorBody.code ?? "http_error",
+    );
+  }
+
+  const uploaded = payload as LogUploadApi;
+  return {
+    accepted: uploaded.accepted,
+    rejected: uploaded.rejected,
+    event_ids: uploaded.event_ids ?? [],
+    errors: uploaded.errors ?? [],
+  };
 }
 
 export type ScenarioLoadApi = {
@@ -201,7 +299,19 @@ export function loadDemoScenario(
   return apiPost<ScenarioLoadApi>(`/api/scenarios/${scenario}/load`, signal);
 }
 
+export type DetectionMatchApi = {
+  rule_id: string;
+  severity: string;
+  event_ids: string[];
+  reason: string;
+  matched_threshold: string;
+  timestamp: string;
+  incident_id: string;
+};
+
 export type DetectIncidentsApi = {
+  matches: DetectionMatchApi[];
+  incidents: IncidentApiItem[];
   created: number;
   updated: number;
   skipped: number;

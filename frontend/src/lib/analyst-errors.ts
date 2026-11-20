@@ -10,6 +10,8 @@ export function analystErrorMessage(error: unknown): string {
   switch (error.status) {
     case 0:
       return "Unable to reach the API.";
+    case 413:
+      return error.message || "Upload exceeds MAX_UPLOAD_SIZE_MB";
     case 401:
       return (
         "Missing or invalid analyst token. The browser never receives ANALYST_API_TOKEN. " +

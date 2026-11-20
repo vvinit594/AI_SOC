@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { FlaskConical } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -14,20 +13,22 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { detectIncidents, loadDemoScenario } from "@/lib/api";
+import { loadDemoScenario } from "@/lib/api";
 import { analystErrorMessage } from "@/lib/analyst-errors";
 import { listScenarios } from "@/lib/data";
 import type { DemoScenario } from "@/lib/types";
 
 export function LoadDemoDialog({
   triggerLabel = "Load Demo Scenario",
+  onLoaded,
 }: {
   triggerLabel?: string;
+  onLoaded?: () => void;
 }) {
-  const router = useRouter();
   const scenarios = listScenarios();
   const [pending, setPending] = useState<DemoScenario | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
 
   async function load(id: DemoScenario) {
     if (pending) {
@@ -37,9 +38,9 @@ export function LoadDemoDialog({
     setError(null);
     try {
       await loadDemoScenario(id);
-      await detectIncidents();
-      router.push("/incidents");
-      router.refresh();
+      onLoaded?.();
+      setOpen(false);
+      setPending(null);
     } catch (caught: unknown) {
       setError(analystErrorMessage(caught));
       setPending(null);
@@ -47,7 +48,7 @@ export function LoadDemoDialog({
   }
 
   return (
-    <Dialog>
+    <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger render={<Button variant="outline" />}>
         <FlaskConical data-icon="inline-start" />
         {triggerLabel}
@@ -56,8 +57,8 @@ export function LoadDemoDialog({
         <DialogHeader>
           <DialogTitle>Load a built-in demo scenario</DialogTitle>
           <DialogDescription>
-            Events are written to PostgreSQL, then detection rules create or update
-            incidents. Nothing is sent to an LLM unless one is configured on the backend.
+            Events are written to PostgreSQL. Detection is not run automatically — use
+            Run Detection after ingest if you want incidents created from these events.
           </DialogDescription>
         </DialogHeader>
         {error ? (
@@ -80,9 +81,7 @@ export function LoadDemoDialog({
                     Scenario {scenario.id} — {scenario.name}
                   </span>
                   <span className="text-xs font-normal text-muted-foreground">
-                    {pending === scenario.id
-                      ? "Loading events and running detection…"
-                      : scenario.blurb}
+                    {pending === scenario.id ? "Loading events…" : scenario.blurb}
                   </span>
                 </span>
               </Button>

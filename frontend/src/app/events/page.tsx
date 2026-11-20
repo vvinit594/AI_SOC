@@ -14,8 +14,10 @@ export default function EventsPage() {
         description="Browse normalized security events persisted by the backend."
       />
       <MockBanner>
-        This table reads <code className="font-mono text-xs">GET /api/events</code>. Use Load
-        built-in scenario to persist demo logs, then detection to create incidents.
+        Events come from PostgreSQL via <code className="font-mono text-xs">GET /api/events</code>.
+        Upload uses <code className="font-mono text-xs">POST /api/logs/upload</code>. Run
+        Detection is a separate <code className="font-mono text-xs">POST /api/incidents/detect</code>{" "}
+        call.
       </MockBanner>
       <EventsExplorer />
     </div>
