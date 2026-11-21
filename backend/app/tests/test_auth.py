@@ -15,7 +15,14 @@ from app.core.security_constants import (
 )
 from app.core.time import utc_now
 from app.db.base import Base
-from app.db.models import SecurityEvent, User, UserSession, Workspace, WorkspaceMembership
+from app.db.models import (
+    PasswordRecoveryToken,
+    SecurityEvent,
+    User,
+    UserSession,
+    Workspace,
+    WorkspaceMembership,
+)
 from app.db.seed import seed_demo_data
 from app.main import create_app
 from app.tests.helpers import (
@@ -63,6 +70,27 @@ def test_register_creates_user_workspace_membership_and_session(application) -> 
             assert sessions[0].revoked_at is None
         finally:
             session.close()
+
+
+def test_register_normalizes_email_and_rejects_case_variant(application) -> None:
+    with CookieClient(application) as client:
+        body = register_user(client, email="Ada@Example.COM")
+        assert body["email"] == "ada@example.com"
+        duplicate = client.post(
+            "/api/auth/register",
+            json={
+                "full_name": "Other",
+                "email": "ADA@example.com",
+                "password": DEFAULT_TEST_PASSWORD,
+            },
+        )
+        assert duplicate.status_code == 409
+        login = client.post(
+            "/api/auth/login",
+            json={"email": "ADA@example.com", "password": DEFAULT_TEST_PASSWORD},
+        )
+        assert login.status_code == 200
+        assert login.json()["email"] == "ada@example.com"
 
 
 def test_register_rejects_duplicate_email(client: TestClient) -> None:
@@ -336,6 +364,66 @@ def test_password_recovery_dev_mode_does_not_claim_email_sent(application) -> No
             json={"email": "recover@example.com", "password": "NewCorrectHorse1"},
         )
         assert login.status_code == 200
+
+
+def test_password_recovery_token_is_single_use_and_expires(application) -> None:
+    with CookieClient(application) as client:
+        register_user(client, email="reuse@example.com")
+        client.post("/api/auth/logout")
+        first = client.post("/api/auth/forgot-password", json={"email": "reuse@example.com"})
+        assert first.status_code == 200
+        token = first.json()["dev_recovery_token"]
+        assert token
+        ok = client.post(
+            "/api/auth/reset-password",
+            json={"token": token, "password": "NewCorrectHorse1"},
+        )
+        assert ok.status_code == 200
+        reused = client.post(
+            "/api/auth/reset-password",
+            json={"token": token, "password": "AnotherCorrectHorse1"},
+        )
+        assert reused.status_code == 400
+        assert "invalid or expired" in reused.json()["detail"].lower()
+
+        again = client.post("/api/auth/forgot-password", json={"email": "reuse@example.com"})
+        expired_token = again.json()["dev_recovery_token"]
+        assert expired_token
+        session = client.app.state.session_factory()
+        try:
+            row = session.scalar(
+                select(PasswordRecoveryToken).where(PasswordRecoveryToken.used_at.is_(None))
+            )
+            assert row is not None
+            row.expires_at = utc_now() - timedelta(seconds=1)
+            session.commit()
+        finally:
+            session.close()
+        expired = client.post(
+            "/api/auth/reset-password",
+            json={"token": expired_token, "password": "ThirdCorrectHorse1"},
+        )
+        assert expired.status_code == 400
+        assert "invalid or expired" in expired.json()["detail"].lower()
+
+
+def test_password_reset_revokes_existing_sessions(application) -> None:
+    with CookieClient(application) as client:
+        register_user(client, email="revoke-reset@example.com")
+        previous = client.cookies.get(SESSION_COOKIE_NAME)
+        assert previous
+        raw = TestClient(client.app)
+        raw.cookies.set(SESSION_COOKIE_NAME, previous)
+        recovery = client.post(
+            "/api/auth/forgot-password", json={"email": "revoke-reset@example.com"}
+        )
+        token = recovery.json()["dev_recovery_token"]
+        reset = client.post(
+            "/api/auth/reset-password",
+            json={"token": token, "password": "ResetCorrectHorse1"},
+        )
+        assert reset.status_code == 200
+        assert raw.get("/api/auth/me").status_code == 401
 
 
 def test_password_recovery_production_requires_delivery_config() -> None:

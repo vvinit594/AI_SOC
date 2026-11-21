@@ -5,7 +5,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.agents.attck import get_attack_technique
-from app.db.models import Incident, IncidentEvent, ResponseAction, SecurityEvent
+from app.agents.tools import search_incident_events
+from app.core.time import utc_now
+from app.db.models import Incident, IncidentEvent, ResponseAction, SecurityEvent, Workspace
 from app.schemas.investigations import AgentFinding
 from app.services.llm import LLMError
 from app.services.threat_intel import NoneThreatIntel, is_documentation_ip
@@ -350,3 +352,41 @@ def test_partial_failure_then_retry_succeeds(client: TestClient, monkeypatch) ->
     assert retry.status_code == 200, retry.text
     assert retry.json()["created"] is True
     assert retry.json()["investigation"]["status"] == "completed"
+
+
+def test_search_incident_events_skips_foreign_workspace_rows(client: TestClient) -> None:
+    incident_id = _open_incident(client)
+    session = client.app.state.session_factory()
+    try:
+        foreign = Workspace(name="other-workspace", kind="personal", created_at=utc_now())
+        session.add(foreign)
+        session.flush()
+        other_event = SecurityEvent(
+            timestamp=datetime(2026, 10, 21, 12, 1, tzinfo=UTC),
+            event_type="login_failure",
+            source_ip="192.0.2.99",
+            username="other_user",
+            hostname="other-host",
+            action="authentication_failed",
+            source="linux_auth",
+            raw_message="Failed password from other workspace",
+            scenario="A",
+            workspace_id=foreign.id,
+        )
+        session.add(other_event)
+        session.flush()
+        session.add(
+            IncidentEvent(
+                incident_id=uuid.UUID(incident_id),
+                event_id=other_event.id,
+                link_type="evidence",
+            )
+        )
+        session.commit()
+        payloads = search_incident_events(session, uuid.UUID(incident_id))
+        ids = {item["id"] for item in payloads}
+        assert str(other_event.id) not in ids
+        assert payloads
+        assert all("other workspace" not in item.get("raw_message", "") for item in payloads)
+    finally:
+        session.close()

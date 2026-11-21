@@ -9,7 +9,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.agents.nodes import NODE_NAMES
-from app.db.models import AgentRun
+from app.core.security_constants import SESSION_COOKIE_NAME
+from app.core.time import utc_now
+from app.core.tokens import hash_token
+from app.db.models import AgentRun, UserSession
 from app.services import progress
 from app.services.investigations import RunRecorder
 from app.tests.test_investigations import _open_incident
@@ -84,6 +87,46 @@ def test_sse_generator_stops_when_workspace_or_session_check_fails(client: TestC
     )
     assert "node_started" not in revoked
     assert "investigation_completed" not in revoked
+
+
+def test_revoked_session_cannot_read_investigation_or_sse(client: TestClient) -> None:
+    incident_id = _open_incident(client)
+    created = client.post(f"/api/incidents/{incident_id}/investigate")
+    assert created.status_code == 200, created.text
+    investigation_id = created.json()["investigation"]["id"]
+    token = client.cookies.get(SESSION_COOKIE_NAME)
+    assert token
+    workspace_id = uuid.UUID(client.get("/api/auth/me").json()["workspace"]["id"])
+    session = client.app.state.session_factory()
+    try:
+        row = session.scalar(select(UserSession).where(UserSession.token_hash == hash_token(token)))
+        assert row is not None
+        row.revoked_at = utc_now()
+        session.commit()
+    finally:
+        session.close()
+    assert client.get(f"/api/investigations/{investigation_id}").status_code == 401
+    assert client.get(f"/api/investigations/{investigation_id}/stream").status_code == 401
+
+    def _authorize(db) -> bool:
+        current = db.scalar(select(UserSession).where(UserSession.token_hash == hash_token(token)))
+        return (
+            current is not None
+            and current.revoked_at is None
+            and current.expires_at > utc_now()
+            and current.workspace_id == workspace_id
+        )
+
+    body = "".join(
+        progress.iter_sse_events(
+            client.app.state.session_factory,
+            uuid.UUID(investigation_id),
+            workspace_id=workspace_id,
+            authorize=_authorize,
+        )
+    )
+    assert "node_started" not in body
+    assert "investigation_completed" not in body
 
 
 def test_sse_replays_completed_investigation(client: TestClient) -> None:

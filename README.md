@@ -2,7 +2,7 @@
 
 An Agentic AI Security Operations Center (SOC) that ingests security logs, detects suspicious activity with transparent rules, coordinates specialized LangGraph agents to investigate incidents, enriches indicators with real threat intelligence, maps behaviour to MITRE ATT&CK, and recommends a safe, human-approved response — all through a live security dashboard.
 
-> **Status:** Phase 10 (local Docker Compose stack) implemented. Phase 11 public deployment has not started. See [`docs/MVP_SPEC.md`](docs/MVP_SPEC.md) for the frozen v1 scope.
+> **Status:** Phase 10 (local Docker Compose stack) and Stage 2 (public registration, cookie sessions, and per-user workspaces) are implemented. Phase 11 public deployment has not started. See [`docs/MVP_SPEC.md`](docs/MVP_SPEC.md) for the frozen v1 scope.
 
 ---
 
@@ -141,7 +141,9 @@ docker compose down
 
 If host port `5432` is already taken (common on Windows), copy `docker-compose.override.example.yml` to `docker-compose.override.yml` and set host `DATABASE_URL` to port `55432`. See [`docs/environment.md`](docs/environment.md).
 
-The Compose frontend image runs production Next.js (`NODE_ENV=production`), so `/api/analyst` stays disabled. Public incident reads still go to `http://localhost:8000`. Direct FastAPI approve/reject works in development with an empty `ANALYST_API_TOKEN` (actor `unverified`). That is not a login session.
+Open [http://localhost:3000/register](http://localhost:3000/register) and create an account. Each registrant gets a private workspace. Historical rows already in PostgreSQL stay on a membership-less legacy workspace and are not assigned to the first user.
+
+The signed-in UI talks to FastAPI with `credentials: "include"` (HttpOnly session cookie plus CSRF header). The browser never receives `ANALYST_API_TOKEN`. The Compose frontend image is production Next.js, so the leftover `/api/analyst` machine-to-machine proxy stays disabled; approve/reject, audit, and report download use the user session against `http://localhost:8000`.
 
 ### Host-run frontend and backend
 
@@ -154,7 +156,7 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Live backend data is used by Response Center, persisted incident detail, audit history, and HTML report download. Overview, event explorer, the incidents list, dashboard metrics, and ATT&CK/root-cause narrative remain Phase 2 mock snapshots unless a matching mock ID exists. The header health indicator calls `GET /health`.
+Open [http://localhost:3000/register](http://localhost:3000/register) or [http://localhost:3000/login](http://localhost:3000/login). Dashboard routes under `(soc)` require a valid session; an expired session redirects to `/login?reason=expired`. Live backend data is used by Response Center, persisted incident detail, audit history, and HTML report download. Overview, event explorer, the incidents list, dashboard metrics, and ATT&CK/root-cause narrative remain Phase 2 mock snapshots unless a matching mock ID exists. The header health indicator calls `GET /health`.
 
 ```bash
 npm run build    # production build check
@@ -205,7 +207,7 @@ npm run build
 
 There is no Playwright suite in this repository. Browser verification of the Response Center remains a manual procedure (see `frontend/README.md`).
 
-Protected analyst UI calls go through same-origin `/api/analyst` in development/test. The browser never receives `ANALYST_API_TOKEN`. Production disables that proxy because there is no login session.
+Signed-in SOC pages call FastAPI with the session cookie. The browser never receives `ANALYST_API_TOKEN`. The same-origin `/api/analyst` proxy is a leftover machine-to-machine helper and is disabled when `NODE_ENV=production`.
 
 ## Development roadmap
 
@@ -222,6 +224,7 @@ Protected analyst UI calls go through same-origin `/api/analyst` in development/
 | 8 | Response center & incident reports | ✅ Done |
 | 9 | Testing & security hardening | ✅ Done |
 | 10 | Dockerize | ✅ Done |
+| Stage 2 | Public registration, sessions, CSRF, workspace isolation | ✅ Done |
 | 11 | Deploy & go live | ⏳ |
 | 12 | Final demo preparation | ⏳ |
 
@@ -242,7 +245,9 @@ All sample data is synthetic and uses RFC 5737 documentation IP ranges.
 - Failed threat-intel lookups are reported as *unavailable*, never fabricated.
 - LLM confidence is a qualitative label, not a calibrated probability.
 - Not built yet: live log streaming, SIEM/EDR integrations, AI SOC assistant, custom-trained models.
-- The Docker frontend is a production Next.js server, so `/api/analyst` remains disabled until real login exists.
+- Public registration creates a personal workspace. Existing events and incidents are not given to the first registrant.
+- Password recovery does **not** send email. Development may return a one-time token; production returns HTTP 503 until mail delivery is implemented (`SMTP_URL` is not enough by itself).
+- A shared `ANALYST_API_TOKEN` remains a workspace-unscoped machine-to-machine fallback. Human operators should use cookie sessions.
 
 ## License
 

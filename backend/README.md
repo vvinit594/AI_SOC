@@ -2,7 +2,7 @@
 
 FastAPI application for log processing, detection, and agent orchestration. The Next.js frontend is a separate package.
 
-Phase 3 implements the process shell: configuration, logging, CORS, routing, and `GET /health`. Phase 4 adds PostgreSQL via SQLAlchemy, typed event/incident schemas, Alembic migrations, and read APIs for events and incidents. Phase 5 adds JSON/CSV upload, demo scenario loaders, and deterministic R1/R2/R3 detection with incident correlation. Phase 6 runs a four-node LangGraph investigation (`POST /api/incidents/{id}/investigate`) and persists each node in `agent_runs`. Phase 7 streams live progress on `GET /api/investigations/{id}/stream` from persisted `agent_runs` (replay + follow). Phase 8A persists response-action decisions and exposes `POST /api/actions/{id}/approve` and `/reject` (simulated only). Phase 8B records those decisions in append-only `audit_logs` and exposes `GET /api/incidents/{id}/audit-logs`. Phase 8C adds `GET /api/incidents/{id}/report` (self-contained HTML download). Phase 9 adds regression tests, CORS coverage on protected routes, report audit-limit truncation, and PostgreSQL persistence tests against throwaway `aisoc_phase9_verify`. Phase 10 runs this API in Docker Compose with a one-shot `alembic upgrade head` service.
+Phase 3 implements the process shell: configuration, logging, CORS, routing, and `GET /health`. Phase 4 adds PostgreSQL via SQLAlchemy, typed event/incident schemas, Alembic migrations, and read APIs for events and incidents. Phase 5 adds JSON/CSV upload, demo scenario loaders, and deterministic R1/R2/R3 detection with incident correlation. Phase 6 runs a four-node LangGraph investigation (`POST /api/incidents/{id}/investigate`) and persists each node in `agent_runs`. Phase 7 streams live progress on `GET /api/investigations/{id}/stream` from persisted `agent_runs` (replay + follow). Phase 8A persists response-action decisions and exposes `POST /api/actions/{id}/approve` and `/reject` (simulated only). Phase 8B records those decisions in append-only `audit_logs` and exposes `GET /api/incidents/{id}/audit-logs`. Phase 8C adds `GET /api/incidents/{id}/report` (self-contained HTML download). Phase 9 adds regression tests, CORS coverage on protected routes, report audit-limit truncation, and PostgreSQL persistence tests against throwaway `aisoc_phase9_verify`. Phase 10 runs this API in Docker Compose with a one-shot `alembic upgrade head` service. Stage 2 adds public registration, Argon2id passwords, opaque HttpOnly sessions, CSRF, and per-user workspaces (`0006_auth_workspaces`). Historical rows stay on a membership-less legacy workspace.
 
 ## Setup
 
@@ -62,8 +62,10 @@ If host port 5432 is already taken (for example a Windows `postgresql-x64-18` se
 ```
 
 - Health: http://localhost:8000/health
-- Events: http://localhost:8000/api/events
-- Incidents: http://localhost:8000/api/incidents
+- Register: `POST /api/auth/register`
+- Login / logout / me: `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`
+- Events: http://localhost:8000/api/events (session workspace)
+- Incidents: http://localhost:8000/api/incidents (session workspace)
 - Investigate: `POST /api/incidents/{id}/investigate`
 - Investigation: `GET /api/investigations/{id}`
 - Live progress (SSE): `GET /api/investigations/{id}/stream`
@@ -85,7 +87,9 @@ If host port 5432 is already taken (for example a Windows `postgresql-x64-18` se
 | unknown UUID | 404 | 404 |
 | invalid UUID | 422 | 422 |
 
-Authentication uses `ANALYST_API_TOKEN` (`Authorization: Bearer …`). Development/test with an empty token records `unverified`. A valid configured token records `analyst`. Production with an empty token returns 403. See `../docs/environment.md`.
+Human operators authenticate with a cookie session. Approve/reject then records `actor=user:{uuid}` and is scoped to that workspace. `ANALYST_API_TOKEN` (`Authorization: Bearer …`) remains a machine-to-machine fallback: development/test with an empty token records `unverified`; a valid token records `analyst`; production with an empty token returns 403. The shared token is not workspace-scoped. See `../docs/environment.md`.
+
+Password recovery: development may return a one-time `dev_recovery_token`. Production returns HTTP 503. Setting `SMTP_URL` does not send mail; delivery is not implemented.
 
 Decisions set `decided_at` (UTC) and keep `simulated=true` and `execution_status=not_executed`. No containment function is invoked. Incident status stays `awaiting_approval` even when one of several actions is decided; action-level status is the source of truth. Incidents are never auto-resolved by an approval.
 
@@ -95,13 +99,13 @@ Re-running an investigation does not delete or reset approved/rejected rows and 
 
 A successful approve or reject inserts one `audit_logs` row in the **same transaction** as the action update. If audit validation or insert fails, the decision is rolled back. Repeating the same decision, 409 conflicts, and 404/422 errors do not write a success audit event. `details` only accepts `decision`, `previous_approval_status`, `resulting_approval_status`, and `action_type`. There is no unique constraint on `(resource_type, resource_id, event_type)`.
 
-`GET /api/incidents/{id}/audit-logs` returns `{items, total}` newest-first (`occurred_at` descending) with the same pagination bounds as incident list (`limit` 1–500, default 100). It uses the same `ANALYST_API_TOKEN` policy as approve/reject. There is no endpoint to edit or delete audit rows. Application code is append-only; a DBA with SQL access can still change the table. Retention is not automated.
+`GET /api/incidents/{id}/audit-logs` returns `{items, total}` newest-first (`occurred_at` descending) with the same pagination bounds as incident list (`limit` 1–500, default 100). Session users only see their workspace. The shared analyst token remains a fallback. There is no endpoint to edit or delete audit rows. Application code is append-only; a DBA with SQL access can still change the table. Retention is not automated.
 
 ### Incident report (Phase 8C)
 
-`GET /api/incidents/{id}/report` returns a self-contained HTML document built from persisted incident, event, investigation, response-action, and audit-log rows. It uses the same `ANALYST_API_TOKEN` policy as approve/reject. The response `Content-Type` is `text/html; charset=utf-8` and `Content-Disposition` is `attachment; filename="incident-{id}-report.html"`. Unknown incidents return 404. Untrusted strings are HTML-escaped; the file has no scripts and can be opened offline. Recommended actions with `execution_status=not_executed` are described as not performed / simulated, never as executed. If more than 500 audit events exist, the report states that older events are omitted; a report with exactly 500 events is not labelled truncated. The report is generated on demand; there is no report table and no additional migration.
+`GET /api/incidents/{id}/report` returns a self-contained HTML document built from persisted incident, event, investigation, response-action, and audit-log rows. Session users only receive reports for their workspace. The response `Content-Type` is `text/html; charset=utf-8` and `Content-Disposition` is `attachment; filename="incident-{id}-report.html"`. Unknown incidents return 404. Untrusted strings are HTML-escaped; the file has no scripts and can be opened offline. Recommended actions with `execution_status=not_executed` are described as not performed / simulated, never as executed. If more than 500 audit events exist, the report states that older events are omitted; a report with exactly 500 events is not labelled truncated. The report is generated on demand; there is no report table and no additional migration.
 
-PostgreSQL integration tests must use `AISOC_POSTGRES_TEST_URL` or the throwaway `aisoc_phase9_verify` database. They skip rather than write to live `aisoc`.
+PostgreSQL integration tests must use throwaway databases (`aisoc_phase5_verify`, `aisoc_phase9_verify`, `aisoc_stage2_verify`). They skip rather than write to live `aisoc`. Stage 2 migration tests upgrade only; they do not downgrade.
 
 ## Checks
 

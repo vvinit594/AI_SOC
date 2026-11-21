@@ -1,6 +1,6 @@
 # AI-SOC — MVP Specification (v1)
 
-**Status:** Phase 10 (local Docker Compose stack) implemented. Scope remains frozen. Phase 11 public deployment has not started.
+**Status:** Phase 10 (local Docker Compose stack) and Stage 2 (public registration, cookie sessions, workspace isolation) are implemented. Frozen v1 product scope below is unchanged. Phase 11 public deployment has not started.
 **Product:** AI-SOC — Autonomous Threat Investigation & Response Platform  
 **One-line definition:** A deployable Agentic AI platform that ingests security events, detects suspicious activity with transparent rules, coordinates specialized LangGraph agents to investigate, enriches indicators with real threat intelligence, explains the probable attack with evidence, and recommends a safe, human-approved response through a live SOC dashboard.
 
@@ -147,5 +147,5 @@ One phase at a time; each phase is reviewed, tested, and committed by the projec
 1. **LLM provider/model** — decided in Phase 6: `LLM_PROVIDER=none` by default; optional `openai` (`gpt-4o-mini`) with structured JSON. No extra LangChain provider package until another vendor is added.
 2. **Threat-intel provider** — decided in Phase 6: `THREAT_INTEL_PROVIDER=none` by default; optional `abuseipdb`. Failures and documentation IPs are `unavailable`, never fabricated as malicious.
 3. **Backend host** for FastAPI (needs long-running requests + SSE): Render, Railway, Fly.io, etc.
-4. **Authentication for approval endpoints** — decided in Phase 8A: shared `ANALYST_API_TOKEN` bearer token. A valid token records actor `analyst` (generic, not a person). Development/test with an empty token allow decisions as `unverified`. Production with an empty token returns HTTP 403. Missing/invalid bearer when a token is configured returns HTTP 401. Phase 9 adds a development/test Next.js proxy that attaches the token server-side; production keeps the proxy disabled until a real login session exists. Per-user login is still deferred. This shared-token proxy is not equivalent to authenticated user sessions.
+4. **Authentication for approval endpoints** — Phase 8A introduced a shared `ANALYST_API_TOKEN` bearer token (`analyst` / development `unverified`). **Stage 2** adds public registration, opaque HttpOnly sessions, CSRF, and per-user personal workspaces. Human UI calls use the session cookie; historical rows stay on a membership-less legacy workspace. The shared token remains a workspace-unscoped machine-to-machine fallback. Password recovery email delivery is not implemented (production HTTP 503).
 5. **Report format** — decided in Phase 8C: self-contained HTML (no extra dependencies). PDF is not generated.

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { loginAccount, registerAccount } from "@/lib/auth";
+import { loginAccount, logoutAccount, registerAccount } from "@/lib/auth";
 import { csrfHeaders, readCsrfToken } from "@/lib/csrf";
 import { API_BASE_URL } from "@/lib/constants";
 
@@ -68,5 +68,25 @@ describe("auth client", () => {
     vi.stubGlobal("document", { cookie: "aisoc_csrf=csrf-test-token; path=/" });
     expect(readCsrfToken()).toBe("csrf-test-token");
     expect(csrfHeaders()).toEqual({ "X-CSRF-Token": "csrf-test-token" });
+  });
+
+  it("logs out with credentials and the CSRF header", async () => {
+    vi.stubGlobal("document", { cookie: "aisoc_csrf=csrf-test-token; path=/" });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await logoutAccount();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(`${API_BASE_URL}/api/auth/logout`);
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+        headers: expect.objectContaining({ "X-CSRF-Token": "csrf-test-token" }),
+      }),
+    );
   });
 });

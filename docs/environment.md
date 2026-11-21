@@ -69,7 +69,7 @@ This document lists every environment variable the AI-SOC application reads, whe
 |----------|----------|---------|--------|-------------|
 | `ANALYST_API_TOKEN` | production: yes (machine-to-machine only) | empty (`None`) | **yes** | Shared bearer token used only when no user session is present, for approve/reject, audit reads, and report download. Human UI uses cookie sessions. |
 | `SESSION_TTL_SECONDS` | no | `43200` (12h) | no | Lifetime of opaque server-side sessions and auth cookies. |
-| `SMTP_URL` | production recovery: yes | empty (`None`) | **yes** | Mail delivery for password recovery. Unset in production returns HTTP 503 without claiming an email was sent. Development may return a one-time recovery token. |
+| `SMTP_URL` | production recovery: yes, once delivery exists | empty (`None`) | **yes** | Reserved for password-recovery mail. Delivery is **not implemented**: production returns HTTP 503 whether this is set or unset, and never claims an email was sent. Development (no SMTP URL) may return a one-time recovery token. |
 | `AISOC_POSTGRES_TEST_URL` | no | unset | **yes** | Optional disposable PostgreSQL URL for integration tests. Must not be the live `aisoc` database. When unset, tests may create `aisoc_phase5_verify` / `aisoc_phase9_verify` on a local cluster. |
 | `RATE_LIMIT_INVESTIGATE_PER_MINUTE` | no | `5` | no | Rate limit for `POST /api/incidents/{id}/investigate`. **Not implemented.** |
 | `RATE_LIMIT_UPLOAD_PER_MINUTE` | no | `10` | no | Rate limit for `POST /api/logs/upload`. **Not implemented.** |
@@ -115,9 +115,9 @@ The `/api/analyst` proxy allowlists only:
 - `GET /api/analyst/incidents/{uuid}/audit-logs`
 - `GET /api/analyst/incidents/{uuid}/report`
 
-It is enabled when `NODE_ENV` is not `production`. In production it returns 403 `analyst_proxy_disabled` because this app has no authenticated user session. A shared token on the server is not login. Direct FastAPI production calls still require `ANALYST_API_TOKEN` on the backend; an empty production token returns 403.
+It is enabled when `NODE_ENV` is not `production`. In production it returns 403 `analyst_proxy_disabled`. That is intentional: Stage 2 human sessions call FastAPI directly with cookies (`credentials: "include"`). A shared token on the server is not a user login. Direct FastAPI production calls without a session still follow the token table above.
 
-Local development: leave both backend and Next.js `ANALYST_API_TOKEN` empty so decisions record actor `unverified`. If the backend token is set, set the same value in `frontend/.env.local` as a **server-only** variable.
+Local development: register or log in and use the cookie session. Leave `ANALYST_API_TOKEN` empty unless you are testing the leftover machine-to-machine path. If that backend token is set, set the same value in `frontend/.env.local` as a **server-only** variable for the proxy only.
 
 ---
 
@@ -146,7 +146,7 @@ The `migrate` service runs `alembic upgrade head` once per `docker compose up` a
 
 On a host where both Windows PostgreSQL and Docker publish `5432`, `localhost:5432` on IPv4 typically reaches the Windows service. Point host `DATABASE_URL` at the Compose override port (for example `55432`) and run Alembic from `backend/` so it loads `backend/.env`.
 
-PostgreSQL integration tests (`backend/app/tests/test_phase5_postgres.py`, `test_phase9_postgres.py`) create throwaway databases `aisoc_phase5_verify` and `aisoc_phase9_verify` on a local cluster. Phase 9 validates `AISOC_POSTGRES_TEST_URL` before any create/drop: it must be PostgreSQL, a local host, and the dedicated name `aisoc_phase9_verify`. Live `aisoc`, `postgres`, remote hosts, and other database names are refused (tests skip). Cleanup warns if the throwaway database cannot be dropped. Credentials are never logged.
+PostgreSQL integration tests (`backend/app/tests/test_phase5_postgres.py`, `test_phase9_postgres.py`, `test_stage2_postgres.py`) create throwaway databases `aisoc_phase5_verify`, `aisoc_phase9_verify`, and `aisoc_stage2_verify` on a local cluster. They refuse live `aisoc`, `postgres`, remote hosts, and other database names (tests skip). Cleanup warns if the throwaway database cannot be dropped. Credentials are never logged. Stage 2 never downgrades.
 
 ```powershell
 cd backend
@@ -161,7 +161,7 @@ cd backend
 |----------|-----------|
 | `DATABASE_URL`, `LLM_*`, `THREAT_INTEL_*`, `ANALYST_API_TOKEN`, `CORS_ALLOWED_ORIGINS` | Backend host secret settings |
 | `NEXT_PUBLIC_API_BASE_URL`, `NEXT_PUBLIC_APP_NAME` | Frontend public env (browser-safe only) |
-| `ANALYST_API_TOKEN`, `API_UPSTREAM_URL` | Next.js **server-only** env for local/dev proxy. Do not set `NEXT_PUBLIC_ANALYST_API_TOKEN`. Production disables the proxy until login exists. |
+| `ANALYST_API_TOKEN`, `API_UPSTREAM_URL` | Next.js **server-only** env for the leftover `/api/analyst` proxy. Do not set `NEXT_PUBLIC_ANALYST_API_TOKEN`. Production Next.js disables that proxy; signed-in pages use FastAPI cookies instead. |
 | `POSTGRES_*` | Managed PostgreSQL provider (connection string exported as `DATABASE_URL`) |
 
 ---
